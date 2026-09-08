@@ -39,6 +39,12 @@ SELECT *
 FROM orders
 WHERE id = $1;
 
+-- name: GetOrderByIDForUpdate :one
+SELECT *
+FROM orders
+WHERE id = $1
+FOR UPDATE;
+
 
 -- name: GetOrdersByUser :many
 SELECT *

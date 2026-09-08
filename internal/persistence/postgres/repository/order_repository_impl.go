@@ -38,6 +38,13 @@ func (r *orderRepository) GetByID(
 	return r.queries.GetOrderByID(ctx, id)
 }
 
+func (r *orderRepository) GetByIDForUpdate(
+	ctx context.Context,
+	id int64,
+) (generated.Order, error) {
+	return r.queries.GetOrderByIDForUpdate(ctx, id)
+}
+
 func (r *orderRepository) UpdateStatus(
 	ctx context.Context,
 	params generated.UpdateOrderStatusParams,

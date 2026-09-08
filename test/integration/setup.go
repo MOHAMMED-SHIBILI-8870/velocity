@@ -30,6 +30,7 @@ type TestContext struct {
 	SymbolRepo           repository.SymbolRepository
 	FailedSettlementRepo repository.FailedSettlementRepository
 
+	Hub            *userstream.Hub
 	UserDispatcher *userstream.Dispatcher
 }
 
@@ -76,6 +77,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		WalletRepo:           repository.NewWalletRepository(db),
 		PositionRepo:         repository.NewPositionRepository(db),
 		SymbolRepo:           repository.NewSymbolRepository(db),
+		Hub:                  hub,
 		UserDispatcher:       dispatcher,
 		FailedSettlementRepo: repository.NewFailedSettlementRepository(db),
 	}

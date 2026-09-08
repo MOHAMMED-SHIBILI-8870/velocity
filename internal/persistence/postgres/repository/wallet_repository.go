@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -35,10 +34,6 @@ func (r *walletRepository) Get(
 	asset string,
 ) (generated.Wallet, error) {
 
-	fmt.Println("================================")
-	fmt.Println("GET WALLET")
-	fmt.Println("USER :", userID)
-	fmt.Println("ASSET:", asset)
 
 	wallet, err := r.q.GetWallet(
 		ctx,
@@ -48,8 +43,6 @@ func (r *walletRepository) Get(
 		},
 	)
 
-	fmt.Println("ERR:", err)
-	fmt.Println("================================")
 
 	return wallet, err
 }
@@ -60,6 +53,21 @@ func (r *walletRepository) Update(
 ) error {
 
 	return r.q.UpdateWallet(ctx, params)
+}
+
+func (r *walletRepository) GetForUpdate(
+	ctx context.Context,
+	userID int64,
+	asset string,
+) (generated.Wallet, error) {
+
+	return r.q.GetWalletForUpdate(
+		ctx,
+		generated.GetWalletForUpdateParams{
+			UserID: userID,
+			Asset:  asset,
+		},
+	)
 }
 
 func (r *walletRepository) List(

@@ -19,6 +19,14 @@ FROM wallets
 WHERE user_id = $1
   AND asset = $2;
 
+
+-- name: GetWalletForUpdate :one
+SELECT *
+FROM wallets
+WHERE user_id = $1
+  AND asset = $2
+FOR UPDATE;
+
 -- name: UpdateWallet :exec
 UPDATE wallets
 SET

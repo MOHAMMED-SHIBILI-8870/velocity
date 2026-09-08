@@ -134,6 +134,119 @@ var (
 		[]string{"action"},
 	)
 
+	HTTPRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velocity_http_requests_total",
+			Help: "Total number of HTTP requests",
+		},
+		[]string{"method", "route", "status"},
+	)
+
+	HTTPRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name: "velocity_http_request_duration_seconds",
+			Help: "HTTP request duration in seconds",
+		},
+		[]string{"method", "route", "status"},
+	)
+
+	// ------------------------------------------------------------
+	// Settlement metrics
+	// ------------------------------------------------------------
+
+	SettlementsTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "velocity_settlements_total",
+			Help: "Total number of settlement attempts",
+		},
+	)
+
+	SettlementFailures = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "velocity_settlement_failures_total",
+			Help: "Total number of settlement attempts that failed",
+		},
+	)
+
+	SettlementDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name: "velocity_settlement_duration_seconds",
+			Help: "Settlement execution duration in seconds",
+		},
+	)
+
+	SettlementRetries = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "velocity_settlement_retries_total",
+			Help: "Total number of failed-settlement retry attempts",
+		},
+	)
+
+	FailedSettlementsCurrent = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "velocity_failed_settlements_current",
+			Help: "Current number of unresolved and retryable failed settlements",
+		},
+	)
+
+	FailedSettlementsDead = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "velocity_failed_settlements_dead_total",
+			Help: "Total number of failed settlements successfully moved to dead state",
+		},
+	)
+
+	FailedSettlementsRecovered = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "velocity_failed_settlements_recovered_total",
+			Help: "Total number of failed settlements successfully recovered",
+		},
+	)
+
+	// ------------------------------------------------------------
+	// Redis market cache metrics
+	// ------------------------------------------------------------
+
+	MarketCacheHits = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velocity_market_cache_hits_total",
+			Help: "Total number of successful market cache reads",
+		},
+		[]string{"operation"},
+	)
+
+	MarketCacheMisses = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velocity_market_cache_misses_total",
+			Help: "Total number of market cache misses",
+		},
+		[]string{"operation"},
+	)
+
+	MarketCacheErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velocity_market_cache_errors_total",
+			Help: "Total number of market cache infrastructure errors",
+		},
+		[]string{"operation"},
+	)
+
+	MarketCacheOperationDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name: "velocity_market_cache_operation_duration_seconds",
+			Help: "Market cache operation duration in seconds",
+		},
+		[]string{"operation"},
+	)
+
+	UserStreamDeliveryFailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velocity_userstream_delivery_failures_total",
+			Help: "Total number of user-stream message delivery failures",
+		},
+		[]string{"event_type"},
+	)
+
 	registerOnce sync.Once
 )
 
@@ -165,6 +278,24 @@ func Register() {
 			RateLimitAllowed,
 			RateLimitRejected,
 			RateLimitErrors,
+
+			HTTPRequestsTotal,
+			HTTPRequestDuration,
+
+			SettlementsTotal,
+			SettlementFailures,
+			SettlementDuration,
+			SettlementRetries,
+			FailedSettlementsCurrent,
+			FailedSettlementsDead,
+			FailedSettlementsRecovered,
+
+			MarketCacheHits,
+			MarketCacheMisses,
+			MarketCacheErrors,
+			MarketCacheOperationDuration,
+
+			UserStreamDeliveryFailures,
 		)
 	})
 }

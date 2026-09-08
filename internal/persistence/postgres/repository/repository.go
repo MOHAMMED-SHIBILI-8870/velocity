@@ -18,6 +18,7 @@ type UserRepository interface {
 type OrderRepository interface {
 	Create(ctx context.Context, params generated.CreateOrderParams) (generated.Order, error)
 	GetByID(ctx context.Context, id int64) (generated.Order, error)
+	GetByIDForUpdate(ctx context.Context, id int64) (generated.Order, error)
 	UpdateStatus(ctx context.Context, params generated.UpdateOrderStatusParams) error
 	ListByUser(ctx context.Context, userID int64) ([]generated.Order, error)
 	ListOpenOrders(ctx context.Context, symbol string) ([]generated.Order, error)
@@ -61,6 +62,7 @@ type PositionRepository interface {
 type WalletRepository interface {
 	Create(ctx context.Context, params generated.CreateWalletParams) (generated.Wallet, error)
 	Get(ctx context.Context, userID int64, asset string) (generated.Wallet, error)
+    GetForUpdate(ctx context.Context, userID int64, asset string) (generated.Wallet, error)
 	Update(ctx context.Context, params generated.UpdateWalletParams) error
 	LockFunds(ctx context.Context, walletID uuid.UUID, amount int64) error
 	List(ctx context.Context, userID int64) ([]generated.Wallet, error)

@@ -29,6 +29,7 @@ type Querier interface {
 	GetLongPositions(ctx context.Context) ([]Position, error)
 	GetOpenOrdersBySymbol(ctx context.Context, symbol string) ([]Order, error)
 	GetOrderByID(ctx context.Context, id int64) (Order, error)
+	GetOrderByIDForUpdate(ctx context.Context, id int64) (Order, error)
 	GetOrderByUserAndID(ctx context.Context, arg GetOrderByUserAndIDParams) (Order, error)
 	GetOrdersBySymbol(ctx context.Context, arg GetOrdersBySymbolParams) ([]Order, error)
 	GetOrdersByUser(ctx context.Context, arg GetOrdersByUserParams) ([]Order, error)
@@ -48,6 +49,7 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	GetWallet(ctx context.Context, arg GetWalletParams) (Wallet, error)
+	GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdateParams) (Wallet, error)
 	IncrementFailedSettlementRetryCount(ctx context.Context, id uuid.UUID) error
 	ListActiveSymbols(ctx context.Context) ([]Symbol, error)
 	ListOpenOrders(ctx context.Context, symbol string) ([]Order, error)

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"sync"
 	"sync/atomic"
 	"velocity/internal/domain/order"
 	"velocity/internal/domain/trade"
@@ -27,7 +28,7 @@ type Engine struct {
 	publisher events.Publisher
 
 	commandQueue chan command.Command
-	tradeQueue   chan *trade.Trade
+	tradeQueue   chan trade.Trade
 
 	walWriter *wal.Writer
 
@@ -37,13 +38,19 @@ type Engine struct {
 	done chan struct{} // new
 }
 
+var submitResultPool = sync.Pool{
+	New: func() any {
+		return make(chan error, 1)
+	},
+}
+
 func (e *Engine) start() {
 	go func() {
 
 		defer close(e.done)
 		for cmd := range e.commandQueue {
-			switch c := cmd.(type) {
-			case command.SubmitOrderCommand:
+			switch c := cmd; c.Kind {
+			case command.Submit:
 
 				if c.Order.Type == constants.StopMarketOrder ||
 					c.Order.Type == constants.StopLimitOrder {
@@ -83,31 +90,32 @@ func (e *Engine) start() {
 					e.lastTradePrice.Store(t.Price)
 					metrics.TradesExecuted.Inc()
 
-					e.tradeQueue <- &t
+					e.tradeQueue <- t
+					if e.publisher != nil {
+						e.publish(events.TradeExecutedEvent{
+							BaseEvent: events.NewBaseEvent(),
 
-					e.publish(events.TradeExecutedEvent{
-						BaseEvent: events.NewBaseEvent(),
+							TradeID: t.ID,
 
-						TradeID: t.ID,
+							BuyOrderID:  t.BuyOrderID,
+							SellOrderID: t.SellOrderID,
 
-						BuyOrderID:  t.BuyOrderID,
-						SellOrderID: t.SellOrderID,
+							BuyerID:  t.BuyerID,
+							SellerID: t.SellerID,
 
-						BuyerID:  t.BuyerID,
-						SellerID: t.SellerID,
+							Symbol: t.Symbol,
 
-						Symbol: t.Symbol,
-
-						Price:    t.Price,
-						Quantity: t.Quantity,
-					})
+							Price:    t.Price,
+							Quantity: t.Quantity,
+						})
+					}
 				}
 
 				e.processTriggeredStops()
 
 				c.Result <- nil
 
-			case command.CancelOrderCommand:
+			case command.Cancel:
 
 				seq := e.incrementSequence()
 
@@ -152,7 +160,7 @@ func (e *Engine) start() {
 				c.Result <- nil
 
 				// in engine.go's start()
-			case command.ModifyOrderCommand:
+			case command.Modify:
 
 				seq := e.incrementSequence()
 
@@ -212,7 +220,7 @@ func New(
 		stopBook:     stopbook.New(),
 		publisher:    publisher,
 		commandQueue: make(chan command.Command, 100000),
-		tradeQueue:   make(chan *trade.Trade, 100000),
+		tradeQueue:   make(chan trade.Trade, 100000),
 		done:         make(chan struct{}),
 	}
 
@@ -258,18 +266,24 @@ func (e *Engine) SubmitOrder(
 		}
 	}
 
-	resultCh := make(chan error, 1)
+	// resultCh := make(chan error, 1)
+	resultCh := submitResultPool.Get().(chan error)
 
-	e.commandQueue <- command.SubmitOrderCommand{
+	e.commandQueue <- command.Command{
+		Kind:   command.Submit,
 		Order:  order,
 		Result: resultCh,
 	}
 
-	return <-resultCh
+	err := <-resultCh
+	submitResultPool.Put(resultCh)
+
+	// return <-resultCh
+	return err
 }
 
 // read-only channel accessor.
-func (e *Engine) Trades() <-chan *trade.Trade {
+func (e *Engine) Trades() <-chan trade.Trade {
 	return e.tradeQueue
 }
 
@@ -279,7 +293,8 @@ func (e *Engine) OrderBook() *orderbook.OrderBook {
 
 func (e *Engine) CancelOrder(orderID int64) error {
 	resultCh := make(chan error, 1)
-	e.commandQueue <- command.CancelOrderCommand{
+	e.commandQueue <- command.Command{
+		Kind:    command.Cancel,
 		OrderID: orderID,
 		Result:  resultCh,
 	}
@@ -294,7 +309,8 @@ func (e *Engine) ModifyOrder(
 
 	resultCh := make(chan error, 1)
 
-	e.commandQueue <- command.ModifyOrderCommand{
+	e.commandQueue <- command.Command{
+		Kind:        command.Modify,
 		OrderID:     orderID,
 		NewPrice:    newPrice,
 		NewQuantity: newQuantity,
@@ -333,7 +349,8 @@ func (e *Engine) processTriggeredStops() {
 
 			for _, trade := range trades {
 				e.lastTradePrice.Store(trade.Price)
-				e.tradeQueue <- &trade
+				metrics.TradesExecuted.Inc()
+				e.tradeQueue <- trade
 			}
 		}
 	}
@@ -350,10 +367,6 @@ func (e *Engine) StopBook() *stopbook.StopBook {
 func (e *Engine) Stop() {
 	close(e.commandQueue)
 	<-e.done
-
-	if e.walWriter != nil {
-		_ = e.walWriter.Close()
-	}
 }
 
 func (e *Engine) RecoverOrder(o *order.Order) {

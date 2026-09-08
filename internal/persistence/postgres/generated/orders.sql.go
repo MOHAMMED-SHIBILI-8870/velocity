@@ -189,6 +189,35 @@ func (q *Queries) GetOrderByID(ctx context.Context, id int64) (Order, error) {
 	return i, err
 }
 
+const getOrderByIDForUpdate = `-- name: GetOrderByIDForUpdate :one
+SELECT id, user_id, symbol, side, order_type, time_in_force, status, price, stop_price, quantity, remaining, filled, created_at, updated_at
+FROM orders
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetOrderByIDForUpdate(ctx context.Context, id int64) (Order, error) {
+	row := q.db.QueryRow(ctx, getOrderByIDForUpdate, id)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Symbol,
+		&i.Side,
+		&i.OrderType,
+		&i.TimeInForce,
+		&i.Status,
+		&i.Price,
+		&i.StopPrice,
+		&i.Quantity,
+		&i.Remaining,
+		&i.Filled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getOrderByUserAndID = `-- name: GetOrderByUserAndID :one
 SELECT id, user_id, symbol, side, order_type, time_in_force, status, price, stop_price, quantity, remaining, filled, created_at, updated_at
 FROM orders

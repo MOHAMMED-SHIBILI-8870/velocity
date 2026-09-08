@@ -3,8 +3,10 @@ package settlementservice
 import (
 	"context"
 	stderrors "errors"
+	"time"
 
 	"velocity/internal/domain/order"
+	"velocity/internal/infrastructure/metrics"
 	"velocity/internal/persistence/postgres/generated"
 	"velocity/internal/userstream"
 	"velocity/pkg/constants"
@@ -51,6 +53,9 @@ func (s *Service) Settle(
 	ctx context.Context,
 	req SettlementRequest,
 ) error {
+
+	start := time.Now()
+	metrics.SettlementsTotal.Inc()
 
 	var (
 		buyerBaseBalance   userstream.BalanceUpdate
@@ -125,20 +130,29 @@ func (s *Service) Settle(
 			// 2. Load the orders.
 			// ---------------------------------------------------------
 
-			buyOrder, err := orderRepo.GetByID(
-				ctx,
-				req.BuyOrderID,
-			)
-			if err != nil {
-				return err
-			}
+			var buyOrder generated.Order
+			var sellOrder generated.Order
 
-			sellOrder, err := orderRepo.GetByID(
-				ctx,
-				req.SellOrderID,
-			)
-			if err != nil {
-				return err
+			if req.BuyOrderID < req.SellOrderID {
+				buyOrder, err = orderRepo.GetByIDForUpdate(ctx, req.BuyOrderID)
+				if err != nil {
+					return err
+				}
+
+				sellOrder, err = orderRepo.GetByIDForUpdate(ctx, req.SellOrderID)
+				if err != nil {
+					return err
+				}
+			} else {
+				sellOrder, err = orderRepo.GetByIDForUpdate(ctx, req.SellOrderID)
+				if err != nil {
+					return err
+				}
+
+				buyOrder, err = orderRepo.GetByIDForUpdate(ctx, req.BuyOrderID)
+				if err != nil {
+					return err
+				}
 			}
 
 			// ---------------------------------------------------------
@@ -361,7 +375,7 @@ func (s *Service) Settle(
 			// 14. Read final wallet balances for user-stream events.
 			// ---------------------------------------------------------
 
-			buyerBaseWallet, err := walletRepo.Get(
+			buyerBaseWallet, err := walletRepo.GetForUpdate(
 				ctx,
 				req.BuyerID,
 				req.BaseAsset,
@@ -370,7 +384,7 @@ func (s *Service) Settle(
 				return err
 			}
 
-			buyerQuoteWallet, err := walletRepo.Get(
+			buyerQuoteWallet, err := walletRepo.GetForUpdate(
 				ctx,
 				req.BuyerID,
 				req.QuoteAsset,
@@ -379,7 +393,7 @@ func (s *Service) Settle(
 				return err
 			}
 
-			sellerBaseWallet, err := walletRepo.Get(
+			sellerBaseWallet, err := walletRepo.GetForUpdate(
 				ctx,
 				req.SellerID,
 				req.BaseAsset,
@@ -388,7 +402,7 @@ func (s *Service) Settle(
 				return err
 			}
 
-			sellerQuoteWallet, err := walletRepo.Get(
+			sellerQuoteWallet, err := walletRepo.GetForUpdate(
 				ctx,
 				req.SellerID,
 				req.QuoteAsset,
@@ -465,11 +479,14 @@ func (s *Service) Settle(
 		},
 	)
 
+	metrics.SettlementDuration.Observe(time.Since(start).Seconds())
+
 	// -------------------------------------------------------------
 	// Transaction failed.
 	// -------------------------------------------------------------
 
 	if err != nil {
+		metrics.SettlementFailures.Inc()
 		return err
 	}
 

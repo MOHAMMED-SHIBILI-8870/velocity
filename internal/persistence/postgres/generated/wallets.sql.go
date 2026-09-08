@@ -79,6 +79,33 @@ func (q *Queries) GetWallet(ctx context.Context, arg GetWalletParams) (Wallet, e
 	return i, err
 }
 
+const getWalletForUpdate = `-- name: GetWalletForUpdate :one
+SELECT id, user_id, asset, available, locked, updated_at
+FROM wallets
+WHERE user_id = $1
+  AND asset = $2
+FOR UPDATE
+`
+
+type GetWalletForUpdateParams struct {
+	UserID int64  `json:"user_id"`
+	Asset  string `json:"asset"`
+}
+
+func (q *Queries) GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdateParams) (Wallet, error) {
+	row := q.db.QueryRow(ctx, getWalletForUpdate, arg.UserID, arg.Asset)
+	var i Wallet
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Asset,
+		&i.Available,
+		&i.Locked,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listWallets = `-- name: ListWallets :many
 SELECT id, user_id, asset, available, locked, updated_at
 FROM wallets
