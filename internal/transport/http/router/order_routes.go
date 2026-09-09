@@ -11,8 +11,9 @@ func RegisterOrderRoutes(
 	api fiber.Router,
 	orderHandler *handler.OrderHandler,
 	rateLimit *middleware.RateLimitMiddleware,
+	auth fiber.Handler,
 ) {
-	orders := api.Group("/orders")
+	orders := api.Group("/orders", auth)
 
 	orders.Post("", rateLimit.Submit, orderHandler.Submit)
 

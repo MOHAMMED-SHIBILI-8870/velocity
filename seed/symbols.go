@@ -31,7 +31,8 @@ func SeedSymbols(
 		)
 
 		if err != nil {
-			return err
+			// Symbol may already exist, ignore error and continue
+			continue
 		}
 	}
 

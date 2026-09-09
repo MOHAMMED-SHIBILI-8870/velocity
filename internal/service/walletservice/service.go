@@ -47,7 +47,7 @@ func (s *Service) LockFunds(
 
 	wallet, err := s.walletRepo.Get(ctx, userID, asset)
 	if err != nil {
-		return err
+		return errors.ErrInsufficientBalance
 	}
 
 	return s.walletRepo.LockFunds(

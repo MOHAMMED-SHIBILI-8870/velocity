@@ -91,6 +91,31 @@ func (m *AuthMiddleware) Authenticate(c *fiber.Ctx) error {
 	return c.Next()
 }
 
+func (m *AuthMiddleware) OptionalAuthenticate(c *fiber.Ctx) error {
+	authHeader := c.Get("Authorization")
+	const bearer = "Bearer "
+	if authHeader == "" || !strings.HasPrefix(authHeader, bearer) {
+		return c.Next()
+	}
+
+	token := strings.TrimPrefix(authHeader, bearer)
+	if token == "" {
+		return c.Next()
+	}
+
+	resp, err := m.identityClient.ValidateToken(c.Context(), token)
+	if err == nil && resp != nil && resp.Valid {
+		c.Locals("authUser", &AuthenticatedUser{
+			UserID: int64(resp.UserId),
+			Email:  resp.Email,
+			Role:   resp.Role,
+		})
+	}
+
+	return c.Next()
+}
+
+
 func (m *AuthMiddleware) AuthenticateWS(c *fiber.Ctx) error {
 
 	token := c.Query("token")

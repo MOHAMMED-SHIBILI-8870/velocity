@@ -9,8 +9,9 @@ import (
 func RegisterWalletRoutes(
 	api fiber.Router,
 	walletHandler *handler.WalletHandler,
+	auth fiber.Handler,
 ) {
-	wallet := api.Group("/wallets")
+	wallet := api.Group("/wallets", auth)
 
 	wallet.Get("/", walletHandler.List)
 

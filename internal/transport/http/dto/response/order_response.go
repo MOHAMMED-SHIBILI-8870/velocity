@@ -3,7 +3,7 @@ package response
 import "time"
 
 type OrderResponse struct {
-	ID          int64     `json:"id"`
+	ID          int64     `json:"id,string"`
 	UserID      int64     `json:"user_id"`
 	Symbol      string    `json:"symbol"`
 	Side        string    `json:"side"`

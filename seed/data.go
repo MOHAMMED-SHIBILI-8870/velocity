@@ -57,6 +57,33 @@ var Symbols = []SymbolSeed{
 		LotSize:     1,
 		IsActive:    true,
 	},
+	{
+		Symbol:      "ETHUSDT",
+		DisplayName: "Ethereum / Tether",
+		BaseAsset:   "ETH",
+		QuoteAsset:  "USDT",
+		TickSize:    1,
+		LotSize:     1,
+		IsActive:    true,
+	},
+	{
+		Symbol:      "SOLUSDT",
+		DisplayName: "Solana / Tether",
+		BaseAsset:   "SOL",
+		QuoteAsset:  "USDT",
+		TickSize:    1,
+		LotSize:     1,
+		IsActive:    true,
+	},
+	{
+		Symbol:      "BNBUSDT",
+		DisplayName: "BNB / Tether",
+		BaseAsset:   "BNB",
+		QuoteAsset:  "USDT",
+		TickSize:    1,
+		LotSize:     1,
+		IsActive:    true,
+	},
 }
 
 var Wallets = []WalletSeed{

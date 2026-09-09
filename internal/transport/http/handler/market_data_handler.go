@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"velocity/internal/analytics/candles"
 	"velocity/internal/service/marketservice"
@@ -15,13 +16,16 @@ import (
 
 type MarketDataHandler struct {
 	marketService *marketservice.Service
+	db            *pgxpool.Pool
 }
 
 func NewMarketDataHandler(
 	marketService *marketservice.Service,
+	db *pgxpool.Pool,
 ) *MarketDataHandler {
 	return &MarketDataHandler{
 		marketService: marketService,
+		db:            db,
 	}
 }
 
@@ -78,6 +82,21 @@ func (h *MarketDataHandler) GetTicker(c *fiber.Ctx) error {
 		})
 	}
 
+	// If no trades executed yet, fallback to product catalog price
+	if ticker.LastPrice == 0 && h.db != nil {
+		var catPrice float64
+		_ = h.db.QueryRow(c.Context(), `
+			SELECT COALESCE(p.price, 0)
+			FROM products p
+			INNER JOIN symbols s ON s.base_asset = p.symbol
+			WHERE s.symbol = $1
+			LIMIT 1
+		`, symbol).Scan(&catPrice)
+		if catPrice > 0 {
+			ticker.LastPrice = int64(catPrice)
+		}
+	}
+
 	return c.JSON(ticker)
 }
 
@@ -99,7 +118,55 @@ func (h *MarketDataHandler) GetRecentTrades(c *fiber.Ctx) error {
 	return c.JSON(trades)
 }
 
+type MarketSymbolDTO struct {
+	Symbol      string  `json:"symbol"`
+	DisplayName string  `json:"display_name"`
+	BaseAsset   string  `json:"base_asset"`
+	QuoteAsset  string  `json:"quote_asset"`
+	TickSize    int64   `json:"tick_size"`
+	LotSize     int64   `json:"lot_size"`
+	Price       float64 `json:"price"`
+	IsActive    bool    `json:"is_active"`
+}
+
 func (h *MarketDataHandler) Symbols(c *fiber.Ctx) error {
+	if h.db != nil {
+		rows, err := h.db.Query(c.Context(), `
+			SELECT DISTINCT ON (s.symbol)
+				s.symbol, s.display_name, s.base_asset, s.quote_asset, 
+				s.tick_size, s.lot_size, s.is_active,
+				COALESCE(p.price, 0) AS catalog_price
+			FROM symbols s
+			LEFT JOIN LATERAL (
+				SELECT price FROM products WHERE symbol = s.base_asset ORDER BY created_at DESC LIMIT 1
+			) p ON true
+			WHERE s.is_active = true
+			ORDER BY s.symbol, s.created_at ASC
+		`)
+		if err == nil {
+			defer rows.Close()
+			var list []MarketSymbolDTO
+			for rows.Next() {
+				var item MarketSymbolDTO
+				var catPrice float64
+				if err := rows.Scan(
+					&item.Symbol, &item.DisplayName, &item.BaseAsset, &item.QuoteAsset,
+					&item.TickSize, &item.LotSize, &item.IsActive, &catPrice,
+				); err == nil {
+					ticker, tErr := h.marketService.GetTicker(c.Context(), item.Symbol)
+					if tErr == nil && ticker != nil && ticker.LastPrice > 0 {
+						item.Price = float64(ticker.LastPrice)
+					} else {
+						item.Price = catPrice
+					}
+					list = append(list, item)
+				}
+			}
+			if len(list) > 0 {
+				return c.JSON(list)
+			}
+		}
+	}
 
 	symbols, err := h.marketService.GetSymbols(
 		c.Context(),
@@ -159,6 +226,23 @@ func (h *MarketDataHandler) GetMarketStats(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": err.Error(),
 		})
+	}
+
+	if stats.LastPrice == 0 && h.db != nil {
+		var catPrice float64
+		_ = h.db.QueryRow(c.Context(), `
+			SELECT COALESCE(p.price, 0)
+			FROM products p
+			INNER JOIN symbols s ON s.base_asset = p.symbol
+			WHERE s.symbol = $1
+			LIMIT 1
+		`, symbol).Scan(&catPrice)
+		if catPrice > 0 {
+			stats.LastPrice = int64(catPrice)
+			stats.HighPrice = int64(catPrice)
+			stats.LowPrice = int64(catPrice)
+			stats.OpenPrice = int64(catPrice)
+		}
 	}
 
 	return c.JSON(stats)

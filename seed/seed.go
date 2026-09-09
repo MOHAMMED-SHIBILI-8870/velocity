@@ -28,5 +28,13 @@ func Run(
 		log.Println("SeedPositions:", err)
 	}
 
+	if err := SeedProducts(ctx, db, 21); err != nil {
+		log.Println("SeedProducts:", err)
+	}
+
+	if err := SeedOrders(ctx, db); err != nil {
+		log.Println("SeedOrders:", err)
+	}
+
 	return nil
 }

@@ -18,6 +18,7 @@ import (
 	"velocity/internal/persistence/postgres/repository"
 	"velocity/internal/persistence/postgres/tx"
 	"velocity/internal/persistence/worker"
+	"velocity/internal/service/marketplaceservice"
 	"velocity/internal/service/marketservice"
 	"velocity/internal/service/orderservice"
 	"velocity/internal/service/positionservice"
@@ -99,7 +100,7 @@ func Bootstrap() (*Container, error) {
 	container.IDGenerator = snowflake.New(1)
 	container.Logger.Info("snowflake id generator initialized")
 
-	identityClient, err := identityclient.New("localhost:50051")
+	identityClient, err := identityclient.New("localhost:50052")
 	if err != nil {
 		return nil, err
 	}
@@ -459,6 +460,7 @@ func Bootstrap() (*Container, error) {
 	// MarketDataHandler
 	container.MarketDataHandler = handler.NewMarketDataHandler(
 		container.MarketService,
+		container.DB,
 	)
 	container.Logger.Info("market data handler initialized")
 
@@ -477,6 +479,12 @@ func Bootstrap() (*Container, error) {
 		container.MarketService,
 	)
 
+	marketplaceService := marketplaceservice.New(
+		container.DB,
+		container.WalletService,
+	)
+	marketplaceHandler := handler.NewMarketplaceHandler(marketplaceService)
+
 	// router
 	router.Register(
 		container.HTTP,
@@ -487,7 +495,9 @@ func Bootstrap() (*Container, error) {
 		container.PositionHandler,
 		container.HealthHandler,
 		container.AdminHandler,
+		marketplaceHandler,
 		container.AuthMiddleware.Authenticate,
+		container.AuthMiddleware.OptionalAuthenticate,
 		httpmiddleware.RequireRole(constants.RoleAdmin),
 		container.RateLimitMiddleware,
 	)

@@ -30,12 +30,6 @@ func (v *BalanceValidator) Validate(
 ) error {
 
 	o := req.Order
-
-	// Balance validation is only required for BUY orders.
-	if o.Side != constants.OrderSideBuy {
-		return nil
-	}
-
 	userID := o.UserID
 
 	symbol, err := v.symbolRepo.Get(ctx, o.Symbol)
@@ -43,19 +37,33 @@ func (v *BalanceValidator) Validate(
 		return err
 	}
 
-	wallet, err := v.walletService.Get(
-		ctx,
-		userID,
-		symbol.QuoteAsset,
-	)
-	if err != nil {
-		return err
-	}
+	if o.Side == constants.OrderSideBuy {
+		wallet, err := v.walletService.Get(
+			ctx,
+			userID,
+			symbol.QuoteAsset,
+		)
+		if err != nil {
+			return errors.ErrInsufficientBalance
+		}
 
-	required := o.Price * o.Quantity
+		required := o.Price * o.Quantity
+		if wallet.Available < required {
+			return errors.ErrInsufficientBalance
+		}
+	} else if o.Side == constants.OrderSideSell {
+		wallet, err := v.walletService.Get(
+			ctx,
+			userID,
+			symbol.BaseAsset,
+		)
+		if err != nil {
+			return errors.ErrInsufficientBalance
+		}
 
-	if wallet.Available < required {
-		return errors.ErrInsufficientBalance
+		if wallet.Available < o.Quantity {
+			return errors.ErrInsufficientBalance
+		}
 	}
 
 	return nil
