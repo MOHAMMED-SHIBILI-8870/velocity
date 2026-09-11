@@ -99,7 +99,7 @@ func Bootstrap() (*Container, error) {
 	container.IDGenerator = snowflake.New(1)
 	container.Logger.Info("snowflake id generator initialized")
 
-	identityClient, err := identityclient.New("localhost:50051")
+	identityClient, err := identityclient.New("localhost:50052")
 	if err != nil {
 		return nil, err
 	}
@@ -261,6 +261,16 @@ func Bootstrap() (*Container, error) {
 	)
 
 	container.Logger.Info("candle backfill service initialized")
+
+	container.CandleRepository = repository.NewCandleRepository(container.DB)
+
+	container.CandlePersister = candles.NewCandlePersister(
+		container.CandleManager,
+		container.CandleRepository,
+		container.Logger,
+	)
+
+	container.CandlePersister.Start(container.ShutdownContext)
 
 	container.MarketBroadcaster = marketdata.NewBroadcaster(
 		container.MarketPublisher,

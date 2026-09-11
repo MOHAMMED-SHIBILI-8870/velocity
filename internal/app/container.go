@@ -89,6 +89,7 @@ type Container struct {
 	SymbolRepository           repository.SymbolRepository
 	WalletRepository           repository.WalletRepository
 	FailedSettlementRepository repository.FailedSettlementRepository
+	CandleRepository           repository.CandleRepository
 	// --------------------------------------------------
 	// Transactions
 	// --------------------------------------------------
@@ -101,6 +102,7 @@ type Container struct {
 
 	TradeConsumer          *worker.TradeConsumer
 	FailedSettlementWorker *worker.FailedSettlementWorker
+	CandlePersister        *candles.CandlePersister
 
 	// --------------------------------------------------
 	// Market Data
