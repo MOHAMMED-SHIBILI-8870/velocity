@@ -1,7 +1,7 @@
 package idgen
 
 import (
-	"sync/atomic"
+	"velocity/pkg/snowflake"
 
 	"github.com/google/uuid"
 )
@@ -27,9 +27,8 @@ func UUID() uuid.UUID {
 	return id
 }
 
-var sequence int64 = 0
+var gen = snowflake.New(0)
 
-// Next returns a unique increasing int64 ID.
 func Next() int64 {
-	return atomic.AddInt64(&sequence, 1)
+	return gen.Next()
 }

@@ -236,12 +236,16 @@ func BenchmarkEngineSubmitOnly(b *testing.B) {
 		e.Stop()
 	})
 
+	// Use one fixed price so the benchmark does not create
+	// a new PriceLevel on every iteration.
+	const price int64 = 1000
+
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
 		sell := createSellOrder(
 			buyIDOffset+int64(i),
-			1000+int64(i),
+			price,
 			1,
 		)
 
