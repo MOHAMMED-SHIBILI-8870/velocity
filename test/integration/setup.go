@@ -82,3 +82,13 @@ func NewTestContext(t *testing.T) *TestContext {
 		FailedSettlementRepo: repository.NewFailedSettlementRepository(db),
 	}
 }
+
+func (tc *TestContext) CleanupTrades(t *testing.T) {
+	t.Helper()
+
+	_, err := tc.DB.Exec(
+		tc.Ctx,
+		`TRUNCATE TABLE trades`,
+	)
+	require.NoError(t, err)
+}

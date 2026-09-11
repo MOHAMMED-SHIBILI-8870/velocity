@@ -52,6 +52,8 @@ type Querier interface {
 	GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdateParams) (Wallet, error)
 	IncrementFailedSettlementRetryCount(ctx context.Context, id uuid.UUID) error
 	ListActiveSymbols(ctx context.Context) ([]Symbol, error)
+	ListCandlesBySymbolInterval(ctx context.Context, arg ListCandlesBySymbolIntervalParams) ([]Candle, error)
+	ListCandlesBySymbolIntervalRange(ctx context.Context, arg ListCandlesBySymbolIntervalRangeParams) ([]Candle, error)
 	ListOpenOrders(ctx context.Context, symbol string) ([]Order, error)
 	ListOpenOrdersByUser(ctx context.Context, userID int64) ([]Order, error)
 	ListOrdersByUser(ctx context.Context, userID int64) ([]Order, error)
@@ -59,6 +61,7 @@ type Querier interface {
 	ListSymbols(ctx context.Context) ([]Symbol, error)
 	ListTradesBySymbol(ctx context.Context, symbol string) ([]Trade, error)
 	ListTradesBySymbolAsc(ctx context.Context, symbol string) ([]Trade, error)
+	ListTradesBySymbolSinceAsc(ctx context.Context, arg ListTradesBySymbolSinceAscParams) ([]Trade, error)
 	ListTradesByUser(ctx context.Context, buyerID int64) ([]Trade, error)
 	ListUnresolvedFailedSettlements(ctx context.Context) ([]FailedSettlement, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
@@ -75,6 +78,7 @@ type Querier interface {
 	UpdatePosition(ctx context.Context, arg UpdatePositionParams) error
 	UpdateSymbolStatus(ctx context.Context, arg UpdateSymbolStatusParams) error
 	UpdateWallet(ctx context.Context, arg UpdateWalletParams) error
+	UpsertCandle(ctx context.Context, arg UpsertCandleParams) (Candle, error)
 	UpsertPosition(ctx context.Context, arg UpsertPositionParams) error
 }
 
