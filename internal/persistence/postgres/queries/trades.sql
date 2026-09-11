@@ -152,3 +152,10 @@ SELECT EXISTS(
     FROM trades
     WHERE id = $1
 );
+
+-- name: ListTradesBySymbolSinceAsc :many
+SELECT *
+FROM trades
+WHERE symbol = $1
+  AND executed_at >= $2
+ORDER BY executed_at ASC, id ASC;

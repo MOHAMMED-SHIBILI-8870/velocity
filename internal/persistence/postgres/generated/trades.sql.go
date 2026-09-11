@@ -549,6 +549,49 @@ func (q *Queries) ListTradesBySymbolAsc(ctx context.Context, symbol string) ([]T
 	return items, nil
 }
 
+const listTradesBySymbolSinceAsc = `-- name: ListTradesBySymbolSinceAsc :many
+SELECT id, buy_order_id, sell_order_id, buyer_id, seller_id, symbol, price, quantity, executed_at
+FROM trades
+WHERE symbol = $1
+  AND executed_at >= $2
+ORDER BY executed_at ASC, id ASC
+`
+
+type ListTradesBySymbolSinceAscParams struct {
+	Symbol     string    `json:"symbol"`
+	ExecutedAt time.Time `json:"executed_at"`
+}
+
+func (q *Queries) ListTradesBySymbolSinceAsc(ctx context.Context, arg ListTradesBySymbolSinceAscParams) ([]Trade, error) {
+	rows, err := q.db.Query(ctx, listTradesBySymbolSinceAsc, arg.Symbol, arg.ExecutedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Trade{}
+	for rows.Next() {
+		var i Trade
+		if err := rows.Scan(
+			&i.ID,
+			&i.BuyOrderID,
+			&i.SellOrderID,
+			&i.BuyerID,
+			&i.SellerID,
+			&i.Symbol,
+			&i.Price,
+			&i.Quantity,
+			&i.ExecutedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTradesByUser = `-- name: ListTradesByUser :many
 SELECT id, buy_order_id, sell_order_id, buyer_id, seller_id, symbol, price, quantity, executed_at
 FROM trades

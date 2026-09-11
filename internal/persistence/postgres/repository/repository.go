@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 	"velocity/internal/persistence/postgres/generated"
 
 	"github.com/google/uuid"
@@ -62,7 +63,7 @@ type PositionRepository interface {
 type WalletRepository interface {
 	Create(ctx context.Context, params generated.CreateWalletParams) (generated.Wallet, error)
 	Get(ctx context.Context, userID int64, asset string) (generated.Wallet, error)
-    GetForUpdate(ctx context.Context, userID int64, asset string) (generated.Wallet, error)
+	GetForUpdate(ctx context.Context, userID int64, asset string) (generated.Wallet, error)
 	Update(ctx context.Context, params generated.UpdateWalletParams) error
 	LockFunds(ctx context.Context, walletID uuid.UUID, amount int64) error
 	List(ctx context.Context, userID int64) ([]generated.Wallet, error)
@@ -76,4 +77,10 @@ type FailedSettlementRepository interface {
 	IncrementRetryCount(ctx context.Context, id uuid.UUID) error
 	Resolve(ctx context.Context, id uuid.UUID) error
 	MarkDead(ctx context.Context, id uuid.UUID) error
+}
+
+type CandleRepository interface {
+	Upsert(ctx context.Context, params generated.UpsertCandleParams) (generated.Candle, error)
+	ListBySymbolInterval(ctx context.Context, symbol string, interval string, limit int32) ([]generated.Candle, error)
+	ListBySymbolIntervalRange(ctx context.Context, symbol string, interval string, start time.Time, end time.Time, limit int32) ([]generated.Candle, error)
 }
