@@ -114,6 +114,7 @@ func (s *Service) Settle(
 					Symbol:      req.Symbol,
 					Price:       req.Price,
 					Quantity:    req.Quantity,
+					ExecutedAt:  req.ExecutedAt,
 				},
 			)
 

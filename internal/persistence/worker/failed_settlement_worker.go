@@ -242,7 +242,8 @@ func (w *FailedSettlementWorker) retry(
 	return w.settlement.Settle(
 		ctx,
 		settlementservice.SettlementRequest{
-			TradeID: failed.TradeID,
+			TradeID:    failed.TradeID,
+			ExecutedAt: failed.ExecutedAt,
 
 			BuyOrderID:  failed.BuyOrderID,
 			SellOrderID: failed.SellOrderID,
