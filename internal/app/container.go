@@ -82,14 +82,15 @@ type Container struct {
 	// Repositories
 	// --------------------------------------------------
 
-	UserRepository             repository.UserRepository
-	OrderRepository            repository.OrderRepository
-	TradeRepository            repository.TradeRepository
-	PositionRepository         repository.PositionRepository
-	SymbolRepository           repository.SymbolRepository
-	WalletRepository           repository.WalletRepository
-	FailedSettlementRepository repository.FailedSettlementRepository
-	CandleRepository           repository.CandleRepository
+	UserRepository              repository.UserRepository
+	OrderRepository             repository.OrderRepository
+	TradeRepository             repository.TradeRepository
+	PositionRepository          repository.PositionRepository
+	SymbolRepository            repository.SymbolRepository
+	WalletRepository            repository.WalletRepository
+	WalletTransactionRepository repository.WalletTransactionRepository
+	FailedSettlementRepository  repository.FailedSettlementRepository
+	CandleRepository            repository.CandleRepository
 	// --------------------------------------------------
 	// Transactions
 	// --------------------------------------------------

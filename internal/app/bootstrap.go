@@ -123,6 +123,7 @@ func Bootstrap() (*Container, error) {
 	container.PositionRepository = repository.NewPositionRepository(container.DB)
 	container.SymbolRepository = repository.NewSymbolRepository(container.DB)
 	container.WalletRepository = repository.NewWalletRepository(container.DB)
+	container.WalletTransactionRepository = repository.NewWalletTransactionRepository(container.DB)
 	container.FailedSettlementRepository = repository.NewFailedSettlementRepository(container.DB)
 
 	container.Logger.Info("repositories initialized")
@@ -360,6 +361,7 @@ func Bootstrap() (*Container, error) {
 
 	container.WalletService = walletservice.New(
 		container.WalletRepository,
+		container.WalletTransactionRepository,
 	)
 
 	container.UserService = userservice.New(
@@ -444,6 +446,7 @@ func Bootstrap() (*Container, error) {
 		container.OrderRepository,
 		container.SymbolRepository,
 		container.UserRepository,
+		container.TradeRepository,
 		container.RiskService,
 		container.WalletService,
 		container.Registry,
