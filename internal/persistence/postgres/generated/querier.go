@@ -20,6 +20,7 @@ type Querier interface {
 	CreateTradeIfNotExists(ctx context.Context, arg CreateTradeIfNotExistsParams) (Trade, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateWallet(ctx context.Context, arg CreateWalletParams) (Wallet, error)
+	CreateWalletTransaction(ctx context.Context, arg CreateWalletTransactionParams) (WalletTransaction, error)
 	DeletePosition(ctx context.Context, arg DeletePositionParams) error
 	DeleteSymbol(ctx context.Context, symbol string) error
 	DeleteUser(ctx context.Context, id int64) error
@@ -52,6 +53,8 @@ type Querier interface {
 	GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdateParams) (Wallet, error)
 	IncrementFailedSettlementRetryCount(ctx context.Context, id uuid.UUID) error
 	ListActiveSymbols(ctx context.Context) ([]Symbol, error)
+	ListCancelableOrdersByUser(ctx context.Context, userID int64) ([]Order, error)
+	ListCancelableOrdersByUserAndSymbol(ctx context.Context, arg ListCancelableOrdersByUserAndSymbolParams) ([]Order, error)
 	ListCandlesBySymbolInterval(ctx context.Context, arg ListCandlesBySymbolIntervalParams) ([]Candle, error)
 	ListCandlesBySymbolIntervalRange(ctx context.Context, arg ListCandlesBySymbolIntervalRangeParams) ([]Candle, error)
 	ListOpenOrders(ctx context.Context, symbol string) ([]Order, error)
@@ -59,12 +62,15 @@ type Querier interface {
 	ListOrdersByUser(ctx context.Context, userID int64) ([]Order, error)
 	ListPositionsByUser(ctx context.Context, userID int64) ([]Position, error)
 	ListSymbols(ctx context.Context) ([]Symbol, error)
+	ListTradesByOrder(ctx context.Context, buyOrderID int64) ([]Trade, error)
 	ListTradesBySymbol(ctx context.Context, symbol string) ([]Trade, error)
 	ListTradesBySymbolAsc(ctx context.Context, symbol string) ([]Trade, error)
 	ListTradesBySymbolSinceAsc(ctx context.Context, arg ListTradesBySymbolSinceAscParams) ([]Trade, error)
 	ListTradesByUser(ctx context.Context, buyerID int64) ([]Trade, error)
 	ListUnresolvedFailedSettlements(ctx context.Context) ([]FailedSettlement, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
+	ListWalletTransactionsByUser(ctx context.Context, userID int64) ([]WalletTransaction, error)
+	ListWalletTransactionsByUserAndAsset(ctx context.Context, arg ListWalletTransactionsByUserAndAssetParams) ([]WalletTransaction, error)
 	ListWallets(ctx context.Context, userID int64) ([]Wallet, error)
 	LockWalletFunds(ctx context.Context, arg LockWalletFundsParams) (int64, error)
 	MarkFailedSettlementDead(ctx context.Context, id uuid.UUID) error

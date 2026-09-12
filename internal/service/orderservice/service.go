@@ -25,6 +25,7 @@ type Service struct {
 	orderRepo  repository.OrderRepository
 	symbolRepo repository.SymbolRepository
 	userRepo   repository.UserRepository
+	tradeRepo  repository.TradeRepository
 
 	risk   *riskservice.Service
 	wallet *walletservice.Service
@@ -40,6 +41,7 @@ func New(
 	orderRepo repository.OrderRepository,
 	symbolRepo repository.SymbolRepository,
 	userRepo repository.UserRepository,
+	tradeRepo repository.TradeRepository,
 
 	risk *riskservice.Service,
 	wallet *walletservice.Service,
@@ -54,6 +56,7 @@ func New(
 		orderRepo:      orderRepo,
 		symbolRepo:     symbolRepo,
 		userRepo:       userRepo,
+		tradeRepo:      tradeRepo,
 		risk:           risk,
 		wallet:         wallet,
 		registry:       registry,
@@ -445,4 +448,102 @@ func (s *Service) GetUserOrderByID(
 	}
 
 	return mapper.ToDomainOrder(dbOrder), nil
+}
+
+func (s *Service) CancelAll(
+	ctx context.Context,
+	userID int64,
+	symbol string,
+) (int, error) {
+
+	_, err := s.userRepo.GetByID(
+		ctx,
+		userID,
+	)
+	if err != nil {
+		return 0, errors.ErrUserNotFound
+	}
+
+	var orders []generated.Order
+
+	if symbol == "" {
+		orders, err = s.orderRepo.ListCancelableOrdersByUser(
+			ctx,
+			userID,
+		)
+	} else {
+		_, err = s.symbolRepo.Get(
+			ctx,
+			symbol,
+		)
+		if err != nil {
+			return 0, errors.ErrSymbolNotFound
+		}
+
+		orders, err = s.orderRepo.ListCancelableOrdersByUserAndSymbol(
+			ctx,
+			generated.ListCancelableOrdersByUserAndSymbolParams{
+				UserID: userID,
+				Symbol: symbol,
+			},
+		)
+	}
+
+	if err != nil {
+		return 0, err
+	}
+
+	cancelled := 0
+
+	for _, dbOrder := range orders {
+		err := s.Cancel(
+			ctx,
+			dbOrder.ID,
+			userID,
+		)
+
+		if err != nil {
+			switch err {
+			case errors.ErrOrderNotCancelable,
+				errors.ErrOrderFilled,
+				errors.ErrOrderCancelled,
+				errors.ErrOrderNotFound:
+
+				// The order may have changed state
+				// between the initial query and cancellation.
+				continue
+
+			default:
+				return cancelled, err
+			}
+		}
+
+		cancelled++
+	}
+
+	return cancelled, nil
+}
+
+func (s *Service) GetOrderTrades(
+	ctx context.Context,
+	orderID int64,
+	userID int64,
+) ([]generated.Trade, error) {
+
+	dbOrder, err := s.orderRepo.GetByID(
+		ctx,
+		orderID,
+	)
+	if err != nil {
+		return nil, errors.ErrOrderNotFound
+	}
+
+	if dbOrder.UserID != userID {
+		return nil, errors.ErrOrderNotFound
+	}
+
+	return s.tradeRepo.ListByOrder(
+		ctx,
+		orderID,
+	)
 }

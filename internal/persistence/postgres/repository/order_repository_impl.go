@@ -130,3 +130,25 @@ func (r *orderRepository) GetByUserAndID(
 		params,
 	)
 }
+
+func (r *orderRepository) ListCancelableOrdersByUser(
+	ctx context.Context,
+	userID int64,
+) ([]generated.Order, error) {
+
+	return r.queries.ListCancelableOrdersByUser(
+		ctx,
+		userID,
+	)
+}
+
+func (r *orderRepository) ListCancelableOrdersByUserAndSymbol(
+	ctx context.Context,
+	params generated.ListCancelableOrdersByUserAndSymbolParams,
+) ([]generated.Order, error) {
+
+	return r.queries.ListCancelableOrdersByUserAndSymbol(
+		ctx,
+		params,
+	)
+}
