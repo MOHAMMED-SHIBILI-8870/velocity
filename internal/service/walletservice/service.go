@@ -117,6 +117,19 @@ func (s *Service) Deposit(
 		return err
 	}
 
+	_, err = s.transactionRepo.Create(
+		ctx,
+		generated.CreateWalletTransactionParams{
+			UserID: userID,
+			Asset:  asset,
+			Amount: amount,
+			Type:   "DEPOSIT",
+		},
+	)
+	if err != nil {
+		return err
+	}
+
 	return s.walletRepo.Update(
 		ctx,
 		generated.UpdateWalletParams{
@@ -137,13 +150,30 @@ func (s *Service) Withdraw(
 		return errors.ErrInvalidQuantity
 	}
 
-	wallet, err := s.walletRepo.Get(ctx, userID, asset)
+	wallet, err := s.walletRepo.GetForUpdate(
+		ctx,
+		userID,
+		asset,
+	)
 	if err != nil {
 		return err
 	}
 
 	if wallet.Available < amount {
 		return errors.ErrInsufficientBalance
+	}
+
+	_, err = s.transactionRepo.Create(
+		ctx,
+		generated.CreateWalletTransactionParams{
+			UserID: userID,
+			Asset:  asset,
+			Amount: amount,
+			Type:   "WITHDRAWAL",
+		},
+	)
+	if err != nil {
+		return err
 	}
 
 	return s.walletRepo.Update(
@@ -219,86 +249,6 @@ func (s *Service) ListTransactionsByAsset(
 		generated.ListWalletTransactionsByUserAndAssetParams{
 			UserID: userID,
 			Asset:  asset,
-		},
-	)
-}
-
-func (s *Service) DepositExternal(
-	ctx context.Context,
-	userID int64,
-	asset string,
-	amount int64,
-) error {
-	if amount <= 0 {
-		return errors.ErrInvalidQuantity
-	}
-
-	wallet, err := s.walletRepo.GetForUpdate(ctx, userID, asset)
-	if err != nil {
-		return err
-	}
-
-	_, err = s.transactionRepo.Create(
-		ctx,
-		generated.CreateWalletTransactionParams{
-			UserID: userID,
-			Asset:  asset,
-			Amount: amount,
-			Type:   "DEPOSIT",
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	return s.walletRepo.Update(
-		ctx,
-		generated.UpdateWalletParams{
-			ID:        wallet.ID,
-			Available: wallet.Available + amount,
-			Locked:    wallet.Locked,
-		},
-	)
-}
-
-func (s *Service) WithdrawExternal(
-	ctx context.Context,
-	userID int64,
-	asset string,
-	amount int64,
-) error {
-	if amount <= 0 {
-		return errors.ErrInvalidQuantity
-	}
-
-	wallet, err := s.walletRepo.GetForUpdate(ctx, userID, asset)
-	if err != nil {
-		return err
-	}
-
-	if wallet.Available < amount {
-		return errors.ErrInsufficientBalance
-	}
-
-	_, err = s.transactionRepo.Create(
-		ctx,
-		generated.CreateWalletTransactionParams{
-			UserID: userID,
-			Asset:  asset,
-			Amount: amount,
-			Type:   "WITHDRAWAL",
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	return s.walletRepo.Update(
-		ctx,
-		generated.UpdateWalletParams{
-			ID:        wallet.ID,
-			Available: wallet.Available - amount,
-			Locked:    wallet.Locked,
 		},
 	)
 }

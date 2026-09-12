@@ -61,22 +61,9 @@ func createWalletTestWallet(
 	require.NoError(t, err)
 }
 
-// TestListTransactionsByAsset_ReturnsRecordedTransactions covers the
-// core case: a deposit and a withdrawal recorded against a wallet both
-// show up, most recent first, when listing that asset's transactions.
-//
-// NOTE: this uses DepositExternal/WithdrawExternal, not Deposit/
-// Withdraw. Deposit and Withdraw - the methods actually wired to
-// POST /wallets/deposit and POST /wallets/withdraw - update the wallet
-// balance but never call transactionRepo.Create. Only the External
-// variants (currently uncalled anywhere in the codebase) write a
-// wallet_transactions row. As written today, a deposit or withdrawal
-// made through the live HTTP API will NOT appear in
-// GET /wallets/:asset/transactions. See TestDeposit_ViaHandlerPath_
-// DoesNotAppearInLedger below, which documents this directly. You'll
-// likely want either handler.Deposit/Withdraw to call the External
-// service methods, or Deposit/Withdraw themselves to record a
-// transaction, before relying on this endpoint in production.
+// TestListTransactionsByAsset_ReturnsRecordedTransactions verifies
+// that deposits and withdrawals appear in the wallet ledger in
+// reverse chronological order.
 func TestListTransactionsByAsset_ReturnsRecordedTransactions(t *testing.T) {
 	tc := integration.NewTestContext(t)
 	svc, _ := newWalletTestService(tc)
@@ -85,8 +72,8 @@ func TestListTransactionsByAsset_ReturnsRecordedTransactions(t *testing.T) {
 	asset := "USD_" + uuid.NewString()[:8]
 	createWalletTestWallet(t, tc, userID, asset)
 
-	require.NoError(t, svc.DepositExternal(tc.Ctx, userID, asset, 500))
-	require.NoError(t, svc.WithdrawExternal(tc.Ctx, userID, asset, 200))
+	require.NoError(t, svc.Deposit(tc.Ctx, userID, asset, 500))
+	require.NoError(t, svc.Withdraw(tc.Ctx, userID, asset, 200))
 
 	txs, err := svc.ListTransactionsByAsset(tc.Ctx, userID, asset)
 	require.NoError(t, err)
@@ -120,8 +107,8 @@ func TestListTransactionsByAsset_ScopedByAsset(t *testing.T) {
 	createWalletTestWallet(t, tc, userID, assetA)
 	createWalletTestWallet(t, tc, userID, assetB)
 
-	require.NoError(t, svc.DepositExternal(tc.Ctx, userID, assetA, 100))
-	require.NoError(t, svc.DepositExternal(tc.Ctx, userID, assetB, 999))
+	require.NoError(t, svc.Deposit(tc.Ctx, userID, assetA, 100))
+	require.NoError(t, svc.Deposit(tc.Ctx, userID, assetB, 999))
 
 	txsA, err := svc.ListTransactionsByAsset(tc.Ctx, userID, assetA)
 	require.NoError(t, err)
@@ -143,8 +130,8 @@ func TestListTransactionsByAsset_ScopedByUser(t *testing.T) {
 	createWalletTestWallet(t, tc, userA, asset)
 	createWalletTestWallet(t, tc, userB, asset)
 
-	require.NoError(t, svc.DepositExternal(tc.Ctx, userA, asset, 111))
-	require.NoError(t, svc.DepositExternal(tc.Ctx, userB, asset, 222))
+	require.NoError(t, svc.Deposit(tc.Ctx, userA, asset, 111))
+	require.NoError(t, svc.Deposit(tc.Ctx, userB, asset, 222))
 
 	txsA, err := svc.ListTransactionsByAsset(tc.Ctx, userA, asset)
 	require.NoError(t, err)
@@ -167,15 +154,10 @@ func TestListTransactionsByAsset_NoTransactions(t *testing.T) {
 	require.Empty(t, txs)
 }
 
-// TestDeposit_ViaHandlerPath_DoesNotAppearInLedger pins down the gap
-// described above: Deposit is the method the live HTTP handler calls
-// for POST /wallets/deposit, and it updates the wallet balance
-// correctly, but it never writes a wallet_transactions row, so it is
-// invisible to the new ledger endpoint. If/when Deposit and Withdraw
-// are wired to record transactions, this test's final assertion
-// (Empty) should be changed to expect one entry - that flip is the
-// signal the fix landed.
-func TestDeposit_ViaHandlerPath_DoesNotAppearInLedger(t *testing.T) {
+// TestDeposit_ViaHandlerPath_AppearsInLedger ensures that the Deposit()
+// method used by the wallet HTTP handler updates the wallet balance and
+// records the corresponding transaction in the wallet ledger.
+func TestDeposit_ViaHandlerPath_AppearsInLedger(t *testing.T) {
 	tc := integration.NewTestContext(t)
 	svc, _ := newWalletTestService(tc)
 
@@ -191,11 +173,41 @@ func TestDeposit_ViaHandlerPath_DoesNotAppearInLedger(t *testing.T) {
 
 	txs, err := svc.ListTransactionsByAsset(tc.Ctx, userID, asset)
 	require.NoError(t, err)
-	require.Empty(
-		t,
-		txs,
-		"Deposit() does not record a wallet_transactions row today; "+
-			"this will need to change once the HTTP deposit endpoint "+
-			"is expected to show up in its own transaction history",
-	)
+	require.Len(t, txs, 1)
+	require.Equal(t, "DEPOSIT", txs[0].Type)
+	require.Equal(t, int64(500), txs[0].Amount)
+	require.Equal(t, asset, txs[0].Asset)
+	require.Equal(t, userID, txs[0].UserID)
+}
+
+// TestWithdraw_ViaHandlerPath_AppearsInLedger ensures that the Withdraw()
+// method used by the wallet HTTP handler updates the wallet balance and
+// records the corresponding transaction in the wallet ledger.
+func TestWithdraw_ViaHandlerPath_AppearsInLedger(t *testing.T) {
+	tc := integration.NewTestContext(t)
+	svc, _ := newWalletTestService(tc)
+
+	userID := createWalletTestUser(t, tc)
+	asset := "WITHDRAW_" + uuid.NewString()[:8]
+	createWalletTestWallet(t, tc, userID, asset)
+
+	require.NoError(t, svc.Deposit(tc.Ctx, userID, asset, 500))
+	require.NoError(t, svc.Withdraw(tc.Ctx, userID, asset, 200))
+
+	wallet, err := tc.WalletRepo.Get(tc.Ctx, userID, asset)
+	require.NoError(t, err)
+	require.Equal(t, int64(300), wallet.Available)
+
+	txs, err := svc.ListTransactionsByAsset(tc.Ctx, userID, asset)
+	require.NoError(t, err)
+
+	require.Len(t, txs, 2)
+
+	require.Equal(t, "WITHDRAWAL", txs[0].Type)
+	require.Equal(t, int64(200), txs[0].Amount)
+	require.Equal(t, asset, txs[0].Asset)
+	require.Equal(t, userID, txs[0].UserID)
+
+	require.Equal(t, "DEPOSIT", txs[1].Type)
+	require.Equal(t, int64(500), txs[1].Amount)
 }
