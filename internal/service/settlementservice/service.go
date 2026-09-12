@@ -85,8 +85,12 @@ func (s *Service) Settle(
 			tradeRepo := repository.NewTradeRepository(tx)
 			positionRepo := repository.NewPositionRepository(tx)
 			walletRepo := repository.NewWalletRepository(tx)
+			walletTransactionRepo := repository.NewWalletTransactionRepository(tx)
 
-			walletService := walletservice.New(walletRepo)
+			walletService := walletservice.New(
+				walletRepo,
+				walletTransactionRepo,
+			)
 
 			// ---------------------------------------------------------
 			// 1. Atomically claim the trade ID.
@@ -210,11 +214,12 @@ func (s *Service) Settle(
 			// 6. Consume buyer's locked quote funds.
 			// ---------------------------------------------------------
 
-			err = walletService.ConsumeLockedFunds(
+			err = walletService.ConsumeLockedFundsFromTrade(
 				ctx,
 				req.BuyerID,
 				req.QuoteAsset,
 				req.Price*req.Quantity,
+				req.TradeID,
 			)
 			if err != nil {
 				return err
@@ -224,11 +229,12 @@ func (s *Service) Settle(
 			// 7. Consume seller's locked base funds.
 			// ---------------------------------------------------------
 
-			err = walletService.ConsumeLockedFunds(
+			err = walletService.ConsumeLockedFundsFromTrade(
 				ctx,
 				req.SellerID,
 				req.BaseAsset,
 				req.Quantity,
+				req.TradeID,
 			)
 			if err != nil {
 				return err
@@ -238,11 +244,12 @@ func (s *Service) Settle(
 			// 8. Deposit purchased base asset to buyer.
 			// ---------------------------------------------------------
 
-			err = walletService.Deposit(
+			err = walletService.DepositFromTrade(
 				ctx,
 				req.BuyerID,
 				req.BaseAsset,
 				req.Quantity,
+				req.TradeID,
 			)
 			if err != nil {
 				return err
@@ -252,11 +259,12 @@ func (s *Service) Settle(
 			// 9. Deposit quote asset to seller.
 			// ---------------------------------------------------------
 
-			err = walletService.Deposit(
+			err = walletService.DepositFromTrade(
 				ctx,
 				req.SellerID,
 				req.QuoteAsset,
 				req.Price*req.Quantity,
+				req.TradeID,
 			)
 			if err != nil {
 				return err

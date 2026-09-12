@@ -117,3 +117,13 @@ type Wallet struct {
 	Locked    int64     `json:"locked"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+type WalletTransaction struct {
+	ID        uuid.UUID   `json:"id"`
+	UserID    int64       `json:"user_id"`
+	Asset     string      `json:"asset"`
+	Amount    int64       `json:"amount"`
+	Type      string      `json:"type"`
+	TradeID   pgtype.Int8 `json:"trade_id"`
+	CreatedAt time.Time   `json:"created_at"`
+}

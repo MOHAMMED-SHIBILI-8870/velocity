@@ -88,7 +88,7 @@ func (tc *TestContext) CleanupTrades(t *testing.T) {
 
 	_, err := tc.DB.Exec(
 		tc.Ctx,
-		`TRUNCATE TABLE trades`,
+		`TRUNCATE TABLE trades, wallet_transactions`,
 	)
 	require.NoError(t, err)
 }

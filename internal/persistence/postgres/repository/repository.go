@@ -31,14 +31,18 @@ type OrderRepository interface {
 	ListOpenOrdersByUser(ctx context.Context, userID int64) ([]generated.Order, error)
 	ListOrdersByUser(ctx context.Context, userID int64) ([]generated.Order, error)
 	GetByUserAndID(ctx context.Context, params generated.GetOrderByUserAndIDParams) (generated.Order, error)
+	ListCancelableOrdersByUser(ctx context.Context, userID int64) ([]generated.Order, error)
+	ListCancelableOrdersByUserAndSymbol(ctx context.Context, params generated.ListCancelableOrdersByUserAndSymbolParams) ([]generated.Order, error)
 }
 
 type TradeRepository interface {
 	Create(ctx context.Context, params generated.CreateTradeParams) (generated.Trade, error)
 	CreateIfNotExists(ctx context.Context, params generated.CreateTradeIfNotExistsParams) (generated.Trade, error)
 	ListByUser(ctx context.Context, userID int64) ([]generated.Trade, error)
+	ListByOrder(ctx context.Context, orderID int64) ([]generated.Trade, error)
 	ListBySymbol(ctx context.Context, symbol string) ([]generated.Trade, error)
 	ListBySymbolAsc(ctx context.Context, symbol string) ([]generated.Trade, error)
+	ListBySymbolSinceAsc(ctx context.Context, symbol string, since time.Time) ([]generated.Trade, error)
 	GetByID(ctx context.Context, id int64) (generated.Trade, error)
 	WithTx(tx pgx.Tx) TradeRepository
 	TradeExists(ctx context.Context, id int64) (bool, error)
@@ -83,4 +87,11 @@ type CandleRepository interface {
 	Upsert(ctx context.Context, params generated.UpsertCandleParams) (generated.Candle, error)
 	ListBySymbolInterval(ctx context.Context, symbol string, interval string, limit int32) ([]generated.Candle, error)
 	ListBySymbolIntervalRange(ctx context.Context, symbol string, interval string, start time.Time, end time.Time, limit int32) ([]generated.Candle, error)
+}
+
+type WalletTransactionRepository interface {
+	Create(ctx context.Context, params generated.CreateWalletTransactionParams) (generated.WalletTransaction, error)
+	ListByUser(ctx context.Context, userID int64) ([]generated.WalletTransaction, error)
+	ListByUserAndAsset(ctx context.Context, params generated.ListWalletTransactionsByUserAndAssetParams) ([]generated.WalletTransaction, error)
+	WithTx(tx pgx.Tx) WalletTransactionRepository
 }
