@@ -79,3 +79,9 @@ rate_limit:
   
   modify_rate: 5
   modify_burst: 10
+
+razorpay:
+  key_id: "rzp_test_SwH8iFgdigaXv4"
+  key_secret: "6LtV47omxT1DBjisL2u4nmtj"
+  webhook_secret: "whsec_velocity_test_123"
+  account_number: "2323230034444444"

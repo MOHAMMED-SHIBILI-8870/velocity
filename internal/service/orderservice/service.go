@@ -273,6 +273,21 @@ func (s *Service) Cancel(
 		return err
 	}
 
+	// Release locked funds back to user's available balance
+	if sym, symErr := s.symbolRepo.Get(ctx, dbOrder.Symbol); symErr == nil {
+		switch constants.OrderSide(dbOrder.Side) {
+		case constants.OrderSideBuy:
+			remainingLocked := dbOrder.Price.Int64 * dbOrder.Remaining
+			if remainingLocked > 0 {
+				_ = s.wallet.UnlockFunds(ctx, dbOrder.UserID, sym.QuoteAsset, remainingLocked)
+			}
+		case constants.OrderSideSell:
+			if dbOrder.Remaining > 0 {
+				_ = s.wallet.UnlockFunds(ctx, dbOrder.UserID, sym.BaseAsset, dbOrder.Remaining)
+			}
+		}
+	}
+
 	o := &order.Order{
 		ID:        dbOrder.ID,
 		UserID:    dbOrder.UserID,

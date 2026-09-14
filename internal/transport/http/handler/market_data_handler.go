@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"velocity/internal/analytics/candles"
+	"velocity/internal/domain/depth"
 	"velocity/internal/service/marketservice"
 	dtoresponse "velocity/internal/transport/http/dto/response"
 	"velocity/internal/transport/http/middleware"
@@ -29,6 +30,23 @@ func NewMarketDataHandler(
 	}
 }
 
+func (h *MarketDataHandler) resolveSymbol(ctx context.Context, input string) string {
+	if input == "" || h.db == nil {
+		return input
+	}
+	var canonical string
+	err := h.db.QueryRow(ctx, `
+		SELECT symbol FROM symbols 
+		WHERE symbol = $1 
+		   OR UPPER(REPLACE(symbol, '_', '')) = UPPER(REPLACE($1, '_', ''))
+		LIMIT 1
+	`, input).Scan(&canonical)
+	if err == nil && canonical != "" {
+		return canonical
+	}
+	return input
+}
+
 // GetOrderBook godoc
 //
 //	@Summary		Get order book
@@ -43,14 +61,15 @@ func NewMarketDataHandler(
 //	@Router			/api/orderbook/{symbol} [get]
 func (h *MarketDataHandler) GetOrderBook(c *fiber.Ctx) error {
 
-	symbol := c.Params("symbol")
-	if symbol == "" {
+	rawSymbol := c.Params("symbol")
+	if rawSymbol == "" {
 		return fiber.NewError(
 			fiber.StatusBadRequest,
 			"symbol is required",
 		)
 	}
 
+	symbol := h.resolveSymbol(c.Context(), rawSymbol)
 	limit := c.QueryInt("limit", 20)
 
 	orderBook, err := h.marketService.GetOrderBook(
@@ -59,7 +78,23 @@ func (h *MarketDataHandler) GetOrderBook(c *fiber.Ctx) error {
 		limit,
 	)
 	if err != nil {
-		return err
+		// If symbol is registered in DB, return an empty depth book rather than failing
+		if h.db != nil {
+			var exists bool
+			_ = h.db.QueryRow(c.Context(), "SELECT EXISTS(SELECT 1 FROM symbols WHERE symbol = $1)", symbol).Scan(&exists)
+			if exists {
+				return c.Status(fiber.StatusOK).JSON(
+					dtoresponse.OrderBookResponse{
+						Symbol: symbol,
+						Bids:   []depth.Level{},
+						Asks:   []depth.Level{},
+					},
+				)
+			}
+		}
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "symbol not found",
+		})
 	}
 
 	return c.Status(fiber.StatusOK).JSON(
@@ -73,10 +108,31 @@ func (h *MarketDataHandler) GetOrderBook(c *fiber.Ctx) error {
 
 func (h *MarketDataHandler) GetTicker(c *fiber.Ctx) error {
 
-	symbol := c.Params("symbol")
+	rawSymbol := c.Params("symbol")
+	symbol := h.resolveSymbol(c.Context(), rawSymbol)
 
 	ticker, err := h.marketService.GetTicker(context.Background(), symbol)
 	if err != nil {
+		// Fallback to product catalog price from database
+		if h.db != nil {
+			var catPrice float64
+			errDb := h.db.QueryRow(c.Context(), `
+				SELECT COALESCE(p.price, 0)
+				FROM symbols s
+				LEFT JOIN products p ON p.symbol = s.base_asset
+				WHERE s.symbol = $1
+				LIMIT 1
+			`, symbol).Scan(&catPrice)
+			if errDb == nil && catPrice > 0 {
+				return c.JSON(fiber.Map{
+					"symbol":     symbol,
+					"last_price": int64(catPrice),
+					"best_bid":   int64(catPrice),
+					"best_ask":   int64(catPrice),
+					"price":      catPrice,
+				})
+			}
+		}
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -102,7 +158,8 @@ func (h *MarketDataHandler) GetTicker(c *fiber.Ctx) error {
 
 func (h *MarketDataHandler) GetRecentTrades(c *fiber.Ctx) error {
 
-	symbol := c.Params("symbol")
+	rawSymbol := c.Params("symbol")
+	symbol := h.resolveSymbol(c.Context(), rawSymbol)
 
 	trades, err := h.marketService.GetRecentTrades(
 		c.Context(),
@@ -110,9 +167,7 @@ func (h *MarketDataHandler) GetRecentTrades(c *fiber.Ctx) error {
 	)
 
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return c.JSON([]interface{}{})
 	}
 
 	return c.JSON(trades)
@@ -219,10 +274,32 @@ func (h *MarketDataHandler) GetUserTrades(c *fiber.Ctx) error {
 
 func (h *MarketDataHandler) GetMarketStats(c *fiber.Ctx) error {
 
-	symbol := c.Params("symbol")
+	rawSymbol := c.Params("symbol")
+	symbol := h.resolveSymbol(c.Context(), rawSymbol)
 
 	stats, err := h.marketService.GetMarketStats(symbol)
 	if err != nil {
+		if h.db != nil {
+			var catPrice float64
+			errDb := h.db.QueryRow(c.Context(), `
+				SELECT COALESCE(p.price, 0)
+				FROM symbols s
+				LEFT JOIN products p ON p.symbol = s.base_asset
+				WHERE s.symbol = $1
+				LIMIT 1
+			`, symbol).Scan(&catPrice)
+			if errDb == nil && catPrice > 0 {
+				return c.JSON(fiber.Map{
+					"symbol":       symbol,
+					"last_price":   int64(catPrice),
+					"high_price":   int64(catPrice),
+					"low_price":    int64(catPrice),
+					"open_price":   int64(catPrice),
+					"change24h":    0.0,
+					"quote_volume": 0.0,
+				})
+			}
+		}
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -257,15 +334,16 @@ func (h *MarketDataHandler) GetCandles(
 		maxLimit     = 1000
 	)
 
-	symbol := c.Params("symbol")
-
-	if symbol == "" {
+	rawSymbol := c.Params("symbol")
+	if rawSymbol == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(
 			fiber.Map{
 				"error": "symbol is required",
 			},
 		)
 	}
+
+	symbol := h.resolveSymbol(c.Context(), rawSymbol)
 
 	intervalStr := c.Query("interval")
 

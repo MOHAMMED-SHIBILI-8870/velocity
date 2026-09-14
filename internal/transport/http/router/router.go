@@ -18,6 +18,7 @@ func Register(
 	healthHandler *handler.HealthHandler,
 	adminHandler *handler.AdminHandler,
 	marketplaceHandler *handler.MarketplaceHandler,
+	paymentHandler *handler.PaymentHandler,
 	auth fiber.Handler,
 	optionalAuth fiber.Handler,
 	requireAdmin fiber.Handler,
@@ -36,6 +37,7 @@ func Register(
 	// Protected Trading Routes
 	api.Get("/market/trades/user", auth, marketHandler.GetUserTrades)
 	RegisterOrderRoutes(api, orderHandler, rateLimit, auth)
+	RegisterPaymentRoutes(api, paymentHandler, auth)
 	RegisterWalletRoutes(api, walletHandler, auth)
 	RegisterPositionRoutes(api, positionHandler, auth)
 

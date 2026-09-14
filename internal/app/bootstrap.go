@@ -21,6 +21,7 @@ import (
 	"velocity/internal/service/marketplaceservice"
 	"velocity/internal/service/marketservice"
 	"velocity/internal/service/orderservice"
+	"velocity/internal/service/paymentservice"
 	"velocity/internal/service/positionservice"
 	"velocity/internal/service/riskservice"
 	"velocity/internal/service/settlementservice" // <-- Add this
@@ -485,6 +486,13 @@ func Bootstrap() (*Container, error) {
 	)
 	marketplaceHandler := handler.NewMarketplaceHandler(marketplaceService)
 
+	paymentService := paymentservice.New(
+		container.DB,
+		container.WalletService,
+		&container.Config.Razorpay,
+	)
+	paymentHandler := handler.NewPaymentHandler(paymentService)
+
 	// router
 	router.Register(
 		container.HTTP,
@@ -496,6 +504,7 @@ func Bootstrap() (*Container, error) {
 		container.HealthHandler,
 		container.AdminHandler,
 		marketplaceHandler,
+		paymentHandler,
 		container.AuthMiddleware.Authenticate,
 		container.AuthMiddleware.OptionalAuthenticate,
 		httpmiddleware.RequireRole(constants.RoleAdmin),
