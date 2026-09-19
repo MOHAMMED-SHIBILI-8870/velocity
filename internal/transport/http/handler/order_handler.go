@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"strings"
 	"velocity/internal/persistence/postgres/mapper"
 	"velocity/internal/service/orderservice"
 	"velocity/pkg/constants"
@@ -51,15 +52,25 @@ func (h *OrderHandler) Submit(c *fiber.Ctx) error {
 		)
 	}
 
+	side := strings.ToUpper(strings.TrimSpace(req.Side))
+	orderType := strings.ToUpper(strings.TrimSpace(req.Type))
+	tif := strings.ToUpper(strings.TrimSpace(req.TimeInForce))
+	if tif == "" {
+		tif = string(constants.TimeInForceGTC)
+	}
+	if orderType == "" {
+		orderType = string(constants.OrderTypeLimit)
+	}
+
 	serviceReq := orderservice.SubmitOrderRequest{
 		UserID: userID,
 
-		Symbol: req.Symbol,
+		Symbol: strings.ToUpper(strings.TrimSpace(req.Symbol)),
 
-		Side: constants.OrderSide(req.Side),
-		Type: constants.OrderType(req.Type),
+		Side: constants.OrderSide(side),
+		Type: constants.OrderType(orderType),
 
-		TimeInForce: constants.TimeInForce(req.TimeInForce),
+		TimeInForce: constants.TimeInForce(tif),
 
 		Price:     req.Price,
 		StopPrice: req.StopPrice,

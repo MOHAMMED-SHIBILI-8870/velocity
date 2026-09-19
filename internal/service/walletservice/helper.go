@@ -44,6 +44,7 @@ func (s *Service) CreateDefaultWallets(
 		"USDT",
 		"BTC",
 		"ETH",
+		"INR",
 	}
 
 	for _, asset := range assets {

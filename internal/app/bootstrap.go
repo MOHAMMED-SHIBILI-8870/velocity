@@ -18,8 +18,10 @@ import (
 	"velocity/internal/persistence/postgres/repository"
 	"velocity/internal/persistence/postgres/tx"
 	"velocity/internal/persistence/worker"
+	"velocity/internal/service/marketplaceservice"
 	"velocity/internal/service/marketservice"
 	"velocity/internal/service/orderservice"
+	"velocity/internal/service/paymentservice"
 	"velocity/internal/service/positionservice"
 	"velocity/internal/service/riskservice"
 	"velocity/internal/service/settlementservice" // <-- Add this
@@ -106,7 +108,6 @@ func Bootstrap() (*Container, error) {
 
 	container.IdentityClient = identityClient
 
-	container.AuthMiddleware = httpmiddleware.NewAuthMiddleware(identityClient)
 
 	container.RateLimitMiddleware = httpmiddleware.NewRateLimitMiddleware(
 		container.RateLimiter,
@@ -370,6 +371,8 @@ func Bootstrap() (*Container, error) {
 	)
 
 	container.Logger.Info("user service initialized")
+	container.AuthMiddleware = httpmiddleware.NewAuthMiddleware(identityClient, container.UserService)
+	container.Logger.Info("auth middleware initialized with user provisioning")
 
 	grpcServer, err := grpcserver.New(container.UserService)
 	if err != nil {
@@ -472,6 +475,7 @@ func Bootstrap() (*Container, error) {
 	// MarketDataHandler
 	container.MarketDataHandler = handler.NewMarketDataHandler(
 		container.MarketService,
+		container.DB,
 	)
 	container.Logger.Info("market data handler initialized")
 
@@ -490,6 +494,20 @@ func Bootstrap() (*Container, error) {
 		container.MarketService,
 	)
 
+	marketplaceService := marketplaceservice.New(
+		container.DB,
+		container.WalletService,
+		container.OrderService,
+	)
+	marketplaceHandler := handler.NewMarketplaceHandler(marketplaceService)
+
+	paymentService := paymentservice.New(
+		container.DB,
+		container.WalletService,
+		&container.Config.Razorpay,
+	)
+	paymentHandler := handler.NewPaymentHandler(paymentService)
+
 	// router
 	router.Register(
 		container.HTTP,
@@ -500,7 +518,10 @@ func Bootstrap() (*Container, error) {
 		container.PositionHandler,
 		container.HealthHandler,
 		container.AdminHandler,
+		marketplaceHandler,
+		paymentHandler,
 		container.AuthMiddleware.Authenticate,
+		container.AuthMiddleware.OptionalAuthenticate,
 		httpmiddleware.RequireRole(constants.RoleAdmin),
 		container.RateLimitMiddleware,
 	)

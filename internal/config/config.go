@@ -17,6 +17,7 @@ type Config struct {
 	Kafka     KafkaConfig     `mapstructure:"kafka"`
 	Tracing   TracingConfig   `mapstructure:"tracing"`
 	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
+	Razorpay  RazorpayConfig  `mapstructure:"razorpay"`
 }
 
 //
@@ -154,4 +155,11 @@ type RateLimitConfig struct {
 
 	ModifyRate  float64 `mapstructure:"modify_rate"`
 	ModifyBurst int     `mapstructure:"modify_burst"`
+}
+
+type RazorpayConfig struct {
+	KeyID         string `mapstructure:"key_id"`
+	KeySecret     string `mapstructure:"key_secret"`
+	WebhookSecret string `mapstructure:"webhook_secret"`
+	AccountNumber string `mapstructure:"account_number"`
 }

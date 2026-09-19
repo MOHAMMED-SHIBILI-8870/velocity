@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -41,12 +42,29 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal configuration: %w", err)
 	}
 
+	populateEnvDefaults(cfg)
+
 	// Validate configuration
 	if err := Validate(cfg); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
+}
+
+func populateEnvDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Razorpay.KeyID == "" {
+		cfg.Razorpay.KeyID = os.Getenv("RAZORPAY_KEY_ID")
+	}
+	if cfg.Razorpay.KeySecret == "" {
+		cfg.Razorpay.KeySecret = os.Getenv("RAZORPAY_KEY_SECRET")
+	}
+	if cfg.Razorpay.WebhookSecret == "" {
+		cfg.Razorpay.WebhookSecret = os.Getenv("RAZORPAY_WEBHOOK_SECRET")
+	}
 }
 
 func LoadFromPath(path string) (*Config, error) {

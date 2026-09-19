@@ -381,6 +381,44 @@ func (s *Service) Settle(
 			}
 
 			// ---------------------------------------------------------
+			// 13b. Synchronize seller marketplace product stock & orders
+			// ---------------------------------------------------------
+			var prodID string
+			var prodStock int
+			qErr := tx.QueryRow(ctx, `
+				SELECT id::text, stock 
+				FROM products 
+				WHERE seller_id = $1 AND symbol = $2 AND stock > 0
+				ORDER BY (CASE WHEN price = $3 THEN 0 ELSE 1 END), created_at ASC 
+				LIMIT 1 
+				FOR UPDATE
+			`, req.SellerID, req.BaseAsset, req.Price).Scan(&prodID, &prodStock)
+
+			if qErr == nil && prodID != "" {
+				newStock := prodStock - int(req.Quantity)
+				newStatus := "Active"
+				if newStock <= 0 {
+					newStock = 0
+					newStatus = "Sold Out"
+				}
+
+				_, _ = tx.Exec(ctx, `
+					UPDATE products 
+					SET stock = $1, status = $2, updated_at = now() 
+					WHERE id = $3::uuid
+				`, newStock, newStatus, prodID)
+
+				unitPrice := float64(req.Price)
+				totalPrice := unitPrice * float64(req.Quantity)
+
+				_, _ = tx.Exec(ctx, `
+					INSERT INTO marketplace_orders (
+						buyer_id, seller_id, product_id, quantity, unit_price, total_price, status, created_at
+					) VALUES ($1, $2, $3::uuid, $4, $5, $6, 'Completed', now())
+				`, req.BuyerID, req.SellerID, prodID, req.Quantity, unitPrice, totalPrice)
+			}
+
+			// ---------------------------------------------------------
 			// 14. Read final wallet balances for user-stream events.
 			// ---------------------------------------------------------
 

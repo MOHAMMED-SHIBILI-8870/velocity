@@ -2,6 +2,8 @@ package userservice
 
 import (
 	"context"
+	"fmt"
+	"sync"
 
 	"velocity/internal/persistence/postgres/generated"
 	"velocity/internal/persistence/postgres/repository"
@@ -11,8 +13,9 @@ import (
 )
 
 type Service struct {
-	userRepo  repository.UserRepository
-	walletSvc *walletservice.Service
+	userRepo      repository.UserRepository
+	walletSvc     *walletservice.Service
+	verifiedUsers sync.Map
 }
 
 func New(
@@ -30,6 +33,17 @@ func (s *Service) CreateUser(
 	req CreateUserRequest,
 ) (*generated.User, error) {
 
+	if req.ID <= 0 {
+		return nil, fmt.Errorf("invalid user id: %d", req.ID)
+	}
+
+	if _, cached := s.verifiedUsers.Load(req.ID); cached {
+		user, err := s.userRepo.GetByID(ctx, req.ID)
+		if err == nil {
+			return &user, nil
+		}
+	}
+
 	exists, err := s.userRepo.Exists(ctx, req.ID)
 	if err != nil {
 		logger.Error(
@@ -41,16 +55,13 @@ func (s *Service) CreateUser(
 	}
 
 	if exists {
-		logger.Info(
-			"user already synchronized",
-			logger.Int64("user_id", req.ID),
-		)
-
 		user, err := s.userRepo.GetByID(ctx, req.ID)
 		if err != nil {
 			return nil, err
 		}
 
+		_ = s.walletSvc.CreateDefaultWallets(ctx, user.ID)
+		s.verifiedUsers.Store(req.ID, true)
 		return &user, nil
 	}
 
@@ -63,21 +74,14 @@ func (s *Service) CreateUser(
 			UpdatedAt: timeutil.UTCNow(),
 		},
 	)
-
-	if err := s.walletSvc.CreateDefaultWallets(
-		ctx,
-		user.ID,
-	); err != nil {
-
-		logger.Error(
-			"failed creating default wallets",
-			logger.ErrorField(err),
-		)
-
-		return nil, err
-	}
-
 	if err != nil {
+		// Fallback: check if created concurrently
+		if u, getErr := s.userRepo.GetByID(ctx, req.ID); getErr == nil {
+			_ = s.walletSvc.CreateDefaultWallets(ctx, u.ID)
+			s.verifiedUsers.Store(req.ID, true)
+			return &u, nil
+		}
+
 		logger.Error(
 			"failed creating user",
 			logger.Int64("user_id", req.ID),
@@ -85,6 +89,18 @@ func (s *Service) CreateUser(
 		)
 		return nil, err
 	}
+
+	if err := s.walletSvc.CreateDefaultWallets(
+		ctx,
+		user.ID,
+	); err != nil {
+		logger.Error(
+			"failed creating default wallets",
+			logger.ErrorField(err),
+		)
+	}
+
+	s.verifiedUsers.Store(req.ID, true)
 
 	logger.Info(
 		"user synchronized successfully",

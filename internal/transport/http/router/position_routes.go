@@ -9,9 +9,9 @@ import (
 func RegisterPositionRoutes(
 	api fiber.Router,
 	positionHandler *handler.PositionHandler,
+	auth fiber.Handler,
 ) {
-
-	positions := api.Group("/positions")
+	positions := api.Group("/positions", auth)
 
 	positions.Get("/", positionHandler.List)
 

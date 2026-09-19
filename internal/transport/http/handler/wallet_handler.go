@@ -285,3 +285,73 @@ func (h *WalletHandler) ListTransactionsByAsset(
 		transactionResponses,
 	)
 }
+
+func (h *WalletHandler) Convert(
+	c *fiber.Ctx,
+) error {
+
+	var req request.ConvertWalletRequest
+
+	if err := c.BodyParser(&req); err != nil {
+		return response.Error(
+			c,
+			fiber.StatusBadRequest,
+			"invalid request body",
+			err.Error(),
+		)
+	}
+
+	userID := middleware.GetUserID(c)
+
+	if userID == 0 {
+		return response.Error(
+			c,
+			fiber.StatusUnauthorized,
+			"invalid user",
+			"user not found in authentication context",
+		)
+	}
+
+	err := h.service.Convert(
+		c.Context(),
+		userID,
+		req.FromAsset,
+		req.ToAsset,
+		req.Amount,
+	)
+
+	if err != nil {
+		return response.Error(
+			c,
+			fiber.StatusBadRequest,
+			"failed to convert funds",
+			err.Error(),
+		)
+	}
+
+	wallets, err := h.service.List(
+		c.Context(),
+		userID,
+	)
+	if err != nil {
+		return response.Success(
+			c,
+			fiber.StatusOK,
+			"conversion completed successfully",
+			fiber.Map{"converted": true},
+		)
+	}
+
+	walletResponses := make([]dtoresponse.WalletResponse, len(wallets))
+	for i, w := range wallets {
+		walletResponses[i] = mapper.ToWalletResponse(w)
+	}
+
+	return response.Success(
+		c,
+		fiber.StatusOK,
+		"conversion completed successfully",
+		walletResponses,
+	)
+}
+

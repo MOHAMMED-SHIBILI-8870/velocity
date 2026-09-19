@@ -2,10 +2,12 @@ package walletservice
 
 import (
 	"context"
+	stderrors "errors"
 	"velocity/internal/persistence/postgres/generated"
 	"velocity/internal/persistence/postgres/repository"
 	"velocity/pkg/errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -22,6 +24,33 @@ func New(
 		walletRepo:      walletRepo,
 		transactionRepo: transactionRepo,
 	}
+}
+
+func (s *Service) getOrCreateForUpdate(
+	ctx context.Context,
+	userID int64,
+	asset string,
+) (generated.Wallet, error) {
+	wallet, err := s.walletRepo.GetForUpdate(ctx, userID, asset)
+	if err == nil {
+		return wallet, nil
+	}
+	if stderrors.Is(err, pgx.ErrNoRows) {
+		wallet, err = s.walletRepo.Create(
+			ctx,
+			generated.CreateWalletParams{
+				UserID:    userID,
+				Asset:     asset,
+				Available: 0,
+				Locked:    0,
+			},
+		)
+		if err != nil {
+			return s.walletRepo.GetForUpdate(ctx, userID, asset)
+		}
+		return wallet, nil
+	}
+	return generated.Wallet{}, err
 }
 
 func (s *Service) Get(ctx context.Context, userID int64, asset string) (generated.Wallet, error) {
@@ -53,7 +82,7 @@ func (s *Service) LockFunds(
 
 	wallet, err := s.walletRepo.Get(ctx, userID, asset)
 	if err != nil {
-		return err
+		return errors.ErrInsufficientBalance
 	}
 
 	return s.walletRepo.LockFunds(
@@ -108,7 +137,7 @@ func (s *Service) Deposit(
 		return errors.ErrInvalidQuantity
 	}
 
-	wallet, err := s.walletRepo.GetForUpdate(
+	wallet, err := s.getOrCreateForUpdate(
 		ctx,
 		userID,
 		asset,
@@ -184,6 +213,92 @@ func (s *Service) Withdraw(
 			Locked:    wallet.Locked,
 		},
 	)
+}
+
+func (s *Service) Convert(
+	ctx context.Context,
+	userID int64,
+	fromAsset string,
+	toAsset string,
+	amount int64,
+) error {
+	if amount <= 0 {
+		return errors.ErrInvalidQuantity
+	}
+	if fromAsset == toAsset {
+		return errors.New(errors.CodeValidation, "cannot convert between identical assets")
+	}
+
+	fromWallet, err := s.walletRepo.GetForUpdate(
+		ctx,
+		userID,
+		fromAsset,
+	)
+	if err != nil {
+		return err
+	}
+
+	if fromWallet.Available < amount {
+		return errors.ErrInsufficientBalance
+	}
+
+	toWallet, err := s.GetOrCreateWallet(
+		ctx,
+		userID,
+		toAsset,
+	)
+	if err != nil {
+		return err
+	}
+
+	// 1. Deduct from source wallet
+	err = s.walletRepo.Update(
+		ctx,
+		generated.UpdateWalletParams{
+			ID:        fromWallet.ID,
+			Available: fromWallet.Available - amount,
+			Locked:    fromWallet.Locked,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	// 2. Credit destination wallet
+	err = s.walletRepo.Update(
+		ctx,
+		generated.UpdateWalletParams{
+			ID:        toWallet.ID,
+			Available: toWallet.Available + amount,
+			Locked:    toWallet.Locked,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	// 3. Record transaction logs for both sides
+	_, _ = s.transactionRepo.Create(
+		ctx,
+		generated.CreateWalletTransactionParams{
+			UserID: userID,
+			Asset:  fromAsset,
+			Amount: amount,
+			Type:   "CONVERT_OUT",
+		},
+	)
+
+	_, _ = s.transactionRepo.Create(
+		ctx,
+		generated.CreateWalletTransactionParams{
+			UserID: userID,
+			Asset:  toAsset,
+			Amount: amount,
+			Type:   "CONVERT_IN",
+		},
+	)
+
+	return nil
 }
 
 func (s *Service) ConsumeLockedFunds(
@@ -348,7 +463,7 @@ func (s *Service) DepositFromTrade(
 		return errors.ErrInvalidQuantity
 	}
 
-	wallet, err := s.walletRepo.GetForUpdate(
+	wallet, err := s.getOrCreateForUpdate(
 		ctx,
 		userID,
 		asset,

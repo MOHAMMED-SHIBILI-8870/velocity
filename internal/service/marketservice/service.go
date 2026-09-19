@@ -210,7 +210,7 @@ func (s *Service) GetSymbols(
 	ctx context.Context,
 ) ([]generated.Symbol, error) {
 
-	return s.symbolRepo.List(
+	return s.symbolRepo.ListActive(
 		ctx,
 	)
 }

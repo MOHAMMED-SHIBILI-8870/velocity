@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS marketplace_orders CASCADE;
+DROP TABLE IF EXISTS user_watchlist CASCADE;
+DROP TABLE IF EXISTS products CASCADE;
