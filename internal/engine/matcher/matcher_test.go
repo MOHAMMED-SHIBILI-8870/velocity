@@ -1,0 +1,927 @@
+package matcher_test
+
+import (
+	"testing"
+	"time"
+
+	"velocity/internal/domain/order"
+	"velocity/internal/engine/matcher"
+	"velocity/internal/engine/orderbook"
+	"velocity/pkg/constants"
+	testhelpers "velocity/test/helpers"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestMatchSellOrderFullFill(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	buy := &order.Order{
+		ID:          1,
+		UserID:      101,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	book.AddOrder(buy)
+
+	sell := &order.Order{
+		ID:          2,
+		UserID:      201,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(sell)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 1)
+
+	assert.Equal(t, int64(100), trades[0].Quantity)
+	assert.Equal(t, int64(1000), trades[0].Price)
+
+	assert.Equal(t, int64(0), sell.Remaining)
+	assert.Equal(t, int64(0), buy.Remaining)
+
+	assert.Equal(t, constants.OrderStatusFilled, sell.Status)
+	assert.Equal(t, constants.OrderStatusFilled, buy.Status)
+
+	assert.Nil(t, book.BestBid())
+}
+
+func TestMatchSellOrderPartialFill(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	buy := &order.Order{
+		ID:          1,
+		UserID:      101,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    50,
+		Remaining:   50,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	book.AddOrder(buy)
+
+	sell := &order.Order{
+		ID:          2,
+		UserID:      201,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(sell)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 1)
+
+	assert.Equal(t, int64(50), trades[0].Quantity)
+
+	assert.Equal(t, int64(50), sell.Remaining)
+	assert.Equal(t, int64(0), buy.Remaining)
+
+	assert.Equal(t, constants.OrderStatusPartiallyFilled, sell.Status)
+	assert.Equal(t, constants.OrderStatusFilled, buy.Status)
+
+	assert.NotNil(t, book.BestAsk())
+}
+
+func TestMatchSellOrderFIFO(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	buy1 := &order.Order{
+		ID:          1,
+		UserID:      101,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    50,
+		Remaining:   50,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	buy2 := &order.Order{
+		ID:          2,
+		UserID:      102,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    50,
+		Remaining:   50,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now().Add(time.Second),
+	}
+
+	book.AddOrder(buy1)
+	book.AddOrder(buy2)
+
+	sell := &order.Order{
+		ID:          3,
+		UserID:      201,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    50,
+		Remaining:   50,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(sell)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 1)
+
+	// buy1 was added first — it should fill first, not buy2
+	assert.Equal(t, int64(1), trades[0].BuyOrderID)
+
+	assert.Equal(t, int64(0), buy1.Remaining)
+	assert.Equal(t, int64(50), buy2.Remaining)
+}
+
+func TestMatchSellOrderMultiplePriceLevels(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	book.AddOrder(&order.Order{
+		ID:          1,
+		UserID:      101,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1005, // best (highest) bid — sellers want the highest price
+		Quantity:    50,
+		Remaining:   50,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	})
+
+	book.AddOrder(&order.Order{
+		ID:          2,
+		UserID:      102,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	})
+
+	sell := &order.Order{
+		ID:          3,
+		UserID:      201,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000, // willing to accept as low as 1000, so both levels qualify
+		Quantity:    120,
+		Remaining:   120,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(sell)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 2)
+
+	// Best bid (1005) should be matched FIRST
+	assert.Equal(t, int64(50), trades[0].Quantity)
+	assert.Equal(t, int64(1005), trades[0].Price)
+
+	assert.Equal(t, int64(70), trades[1].Quantity)
+	assert.Equal(t, int64(1000), trades[1].Price)
+
+	assert.Equal(t, int64(0), sell.Remaining)
+}
+
+func TestMatchSellOrderSkipsSelfTradeToNextLevel(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	// seller's own resting buy order sits at the BEST price (1005).
+	// It must be skipped due to self-trade prevention.
+	ownBuy := &order.Order{
+		ID:          1,
+		UserID:      201, // same user as the incoming sell below
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1005,
+		Quantity:    50,
+		Remaining:   50,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	// A different buyer sits at a WORSE price (1000) — this is the one
+	// that should actually get matched.
+	otherBuy := &order.Order{
+		ID:          2,
+		UserID:      102,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    50,
+		Remaining:   50,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	book.AddOrder(ownBuy)
+	book.AddOrder(otherBuy)
+
+	sell := &order.Order{
+		ID:          3,
+		UserID:      201,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000, // willing to accept as low as 1000, so both levels qualify
+		Quantity:    50,
+		Remaining:   50,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(sell)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 1)
+
+	// Must have matched the OTHER buyer at 1000, not self at 1005
+	assert.Equal(t, int64(2), trades[0].BuyOrderID)
+	assert.Equal(t, int64(1000), trades[0].Price)
+	assert.Equal(t, int64(50), trades[0].Quantity)
+
+	assert.Equal(t, int64(0), sell.Remaining)
+	assert.Equal(t, constants.OrderStatusFilled, sell.Status)
+
+	// The self-order at 1005 must still be resting, untouched
+	assert.Equal(t, int64(50), ownBuy.Remaining)
+	assert.Equal(t, constants.OrderStatusOpen, ownBuy.Status)
+}
+
+func TestMatchMarketBuyOrderConsumesLiquidity(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	sell := &order.Order{
+		ID:          1,
+		UserID:      201,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	book.AddOrder(sell)
+
+	// Market buy — Price is irrelevant/unused here (commonly 0),
+	// should match regardless of the resting order's price.
+	buy := &order.Order{
+		ID:          2,
+		UserID:      101,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeMarket,
+		Status:      constants.OrderStatusOpen,
+		Price:       0,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(buy)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 1)
+
+	// Trade executes at the RESTING order's price, not the market order's price
+	assert.Equal(t, int64(1000), trades[0].Price)
+	assert.Equal(t, int64(100), trades[0].Quantity)
+
+	assert.Equal(t, int64(0), buy.Remaining)
+	assert.Equal(t, constants.OrderStatusFilled, buy.Status)
+	assert.Nil(t, book.BestAsk())
+}
+
+func TestMatchMarketSellOrderConsumesLiquidity(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	buy := &order.Order{
+		ID:          1,
+		UserID:      101,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	book.AddOrder(buy)
+
+	sell := &order.Order{
+		ID:          2,
+		UserID:      201,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeMarket,
+		Status:      constants.OrderStatusOpen,
+		Price:       0,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(sell)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 1)
+
+	assert.Equal(t, int64(1000), trades[0].Price)
+	assert.Equal(t, int64(100), trades[0].Quantity)
+
+	assert.Equal(t, int64(0), sell.Remaining)
+	assert.Equal(t, constants.OrderStatusFilled, sell.Status)
+	assert.Nil(t, book.BestBid())
+}
+
+func TestMatchMarketBuyOrderPartialFillDoesNotRest(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	// Only 30 available, but the market order wants 100
+	sell := &order.Order{
+		ID:          1,
+		UserID:      201,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeLimit,
+		Status:      constants.OrderStatusOpen,
+		Price:       1000,
+		Quantity:    30,
+		Remaining:   30,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	book.AddOrder(sell)
+
+	buy := &order.Order{
+		ID:          2,
+		UserID:      101,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeMarket,
+		Status:      constants.OrderStatusOpen,
+		Price:       0,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(buy)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 1)
+	assert.Equal(t, int64(30), trades[0].Quantity)
+
+	// 70 units unfilled — should be dropped, NOT resting on the book
+	assert.Equal(t, int64(70), buy.Remaining)
+	assert.Equal(t, constants.OrderStatusPartiallyFilled, buy.Status)
+
+	// The book must have nothing resting — no ask (fully consumed) and,
+	// critically, no bid either (the leftover market buy must NOT be added)
+	assert.Nil(t, book.BestAsk())
+	assert.Nil(t, book.BestBid())
+}
+
+func TestMatchMarketOrderOnEmptyBookProducesNoTrades(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	buy := &order.Order{
+		ID:          1,
+		UserID:      101,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeMarket,
+		Status:      constants.OrderStatusOpen,
+		Price:       0,
+		Quantity:    100,
+		Remaining:   100,
+		TimeInForce: constants.TimeInForceGTC,
+		CreatedAt:   time.Now(),
+	}
+
+	trades, err := m.Match(buy)
+
+	require.NoError(t, err)
+	assert.Len(t, trades, 0)
+
+	// Fully unfilled market order — must NOT rest on the book
+	assert.Equal(t, int64(100), buy.Remaining)
+	assert.Equal(t, constants.OrderStatusOpen, buy.Status)
+	assert.Nil(t, book.BestBid())
+}
+
+func TestFilledOrderRemovedFromIndex(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	buy := testhelpers.NewOrder(
+		1,
+		1,
+		constants.OrderSideBuy,
+		1000,
+		100,
+	)
+
+	sell := testhelpers.NewOrder(
+		2,
+		2,
+		constants.OrderSideSell,
+		1000,
+		100,
+	)
+
+	book.AddOrder(buy)
+
+	_, err := m.Match(sell)
+
+	require.NoError(t, err)
+
+	_, exists := book.Orders[buy.ID]
+
+	assert.False(t, exists)
+}
+
+func TestIOCPartialFillDoesNotRest(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	restingSell := testhelpers.NewOrder(
+		1,
+		1,
+		constants.OrderSideSell,
+		1000,
+		50,
+	)
+
+	book.AddOrder(restingSell)
+
+	iocBuy := testhelpers.NewOrder(
+		2,
+		2,
+		constants.OrderSideBuy,
+		1000,
+		100,
+	)
+
+	iocBuy.TimeInForce = constants.TimeInForceIOC
+
+	trades, err := m.Match(iocBuy)
+
+	require.NoError(t, err)
+
+	assert.Len(t, trades, 1)
+	assert.Equal(t, int64(50), iocBuy.Filled)
+	assert.Equal(t, int64(50), iocBuy.Remaining)
+	assert.Equal(t, constants.OrderStatusPartiallyFilled, iocBuy.Status)
+
+	// IOC remainder must not rest on the book
+	assert.Nil(t, book.BestBid())
+}
+
+func TestIOCNoMatchCancelsOrder(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	iocBuy := testhelpers.NewOrder(
+		1,
+		1,
+		constants.OrderSideBuy,
+		1000,
+		100,
+	)
+
+	iocBuy.TimeInForce = constants.TimeInForceIOC
+
+	trades, err := m.Match(iocBuy)
+
+	require.NoError(t, err)
+
+	assert.Len(t, trades, 0)
+	assert.Equal(t, constants.OrderStatusCancelled, iocBuy.Status)
+	assert.Equal(t, int64(100), iocBuy.Remaining)
+
+	// Must not rest on the book
+	assert.Nil(t, book.BestBid())
+}
+
+func TestIOCFullFill(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	restingSell := testhelpers.NewOrder(
+		1,
+		1,
+		constants.OrderSideSell,
+		1000,
+		100,
+	)
+
+	book.AddOrder(restingSell)
+
+	iocBuy := testhelpers.NewOrder(
+		2,
+		2,
+		constants.OrderSideBuy,
+		1000,
+		100,
+	)
+
+	iocBuy.TimeInForce = constants.TimeInForceIOC
+
+	trades, err := m.Match(iocBuy)
+
+	require.NoError(t, err)
+
+	assert.Len(t, trades, 1)
+	assert.Equal(t, constants.OrderStatusFilled, iocBuy.Status)
+	assert.Equal(t, int64(0), iocBuy.Remaining)
+
+	assert.Nil(t, book.BestAsk())
+	assert.Nil(t, book.BestBid())
+}
+
+func TestFOKFullFill(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	book.AddOrder(
+		testhelpers.NewOrder(
+			1,
+			1,
+			constants.OrderSideSell,
+			1000,
+			100,
+		),
+	)
+
+	buy := testhelpers.NewOrder(
+		2,
+		2,
+		constants.OrderSideBuy,
+		1000,
+		100,
+	)
+
+	buy.TimeInForce = constants.TimeInForceFOK
+
+	trades, err := m.Match(buy)
+
+	require.NoError(t, err)
+
+	assert.Len(t, trades, 1)
+	assert.Equal(t, constants.OrderStatusFilled, buy.Status)
+}
+
+func TestFOKInsufficientLiquidityCancelsOrder(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	book.AddOrder(
+		testhelpers.NewOrder(
+			1,
+			1,
+			constants.OrderSideSell,
+			1000,
+			50,
+		),
+	)
+
+	buy := testhelpers.NewOrder(
+		2,
+		2,
+		constants.OrderSideBuy,
+		1000,
+		100,
+	)
+
+	buy.TimeInForce = constants.TimeInForceFOK
+
+	trades, err := m.Match(buy)
+
+	require.NoError(t, err)
+
+	assert.Empty(t, trades)
+	assert.Equal(t, constants.OrderStatusCancelled, buy.Status)
+}
+
+func TestFOKDoesNotRestOnBook(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	buy := testhelpers.NewOrder(
+		1,
+		1,
+		constants.OrderSideBuy,
+		1000,
+		100,
+	)
+
+	buy.TimeInForce = constants.TimeInForceFOK
+
+	_, err := m.Match(buy)
+
+	require.NoError(t, err)
+
+	assert.Nil(t, book.BestBid())
+	assert.Equal(t, constants.OrderStatusCancelled, buy.Status)
+}
+
+func TestFOKIgnoresSelfTradeLiquidity(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	book.AddOrder(
+		testhelpers.NewOrder(
+			1,
+			1,
+			constants.OrderSideSell,
+			1000,
+			100,
+		),
+	)
+
+	buy := testhelpers.NewOrder(
+		2,
+		1,
+		constants.OrderSideBuy,
+		1000,
+		100,
+	)
+
+	buy.TimeInForce = constants.TimeInForceFOK
+
+	trades, err := m.Match(buy)
+
+	require.NoError(t, err)
+
+	assert.Empty(t, trades)
+	assert.Equal(t, constants.OrderStatusCancelled, buy.Status)
+}
+
+func TestPostOnlyBuyCrossingIsRejected(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	resting := &order.Order{
+		ID:        1,
+		UserID:    1,
+		Symbol:    "BTCUSDT",
+		Side:      constants.OrderSideSell,
+		Type:      constants.OrderTypeLimit,
+		Status:    constants.OrderStatusOpen,
+		Price:     1000,
+		Quantity:  10,
+		Remaining: 10,
+	}
+
+	book.AddOrder(resting)
+
+	incoming := &order.Order{
+		ID:          2,
+		UserID:      2,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		TimeInForce: constants.TimeInForcePostOnly,
+		Price:       1000,
+		Quantity:    5,
+		Remaining:   5,
+	}
+
+	trades, err := m.Match(incoming)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 0)
+	require.Equal(
+		t,
+		constants.OrderStatusRejected,
+		incoming.Status,
+	)
+}
+
+func TestPostOnlySellCrossingIsRejected(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	resting := &order.Order{
+		ID:        1,
+		UserID:    1,
+		Symbol:    "BTCUSDT",
+		Side:      constants.OrderSideBuy,
+		Type:      constants.OrderTypeLimit,
+		Status:    constants.OrderStatusOpen,
+		Price:     1000,
+		Quantity:  10,
+		Remaining: 10,
+	}
+
+	book.AddOrder(resting)
+
+	incoming := &order.Order{
+		ID:          2,
+		UserID:      2,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideSell,
+		Type:        constants.OrderTypeLimit,
+		TimeInForce: constants.TimeInForcePostOnly,
+		Price:       1000,
+		Quantity:    5,
+		Remaining:   5,
+	}
+
+	trades, err := m.Match(incoming)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 0)
+	require.Equal(
+		t,
+		constants.OrderStatusRejected,
+		incoming.Status,
+	)
+}
+
+func TestPostOnlyBuyRestsOnBook(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	book.AddOrder(&order.Order{
+		ID:        1,
+		UserID:    1,
+		Symbol:    "BTCUSDT",
+		Side:      constants.OrderSideSell,
+		Type:      constants.OrderTypeLimit,
+		Status:    constants.OrderStatusOpen,
+		Price:     1000,
+		Quantity:  10,
+		Remaining: 10,
+	})
+
+	incoming := &order.Order{
+		ID:          2,
+		UserID:      2,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		TimeInForce: constants.TimeInForcePostOnly,
+		Status:      constants.OrderStatusPending,
+		Price:       990,
+		Quantity:    5,
+		Remaining:   5,
+	}
+
+	trades, err := m.Match(incoming)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 0)
+
+	require.Equal(
+		t,
+		constants.OrderStatusOpen,
+		incoming.Status,
+	)
+
+	require.NotNil(
+		t,
+		book.GetOrder(incoming.ID),
+	)
+}
+
+func TestPostOnlyAcceptedOnEmptyBook(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	incoming := &order.Order{
+		ID:          1,
+		UserID:      1,
+		Symbol:      "BTCUSDT",
+		Side:        constants.OrderSideBuy,
+		Type:        constants.OrderTypeLimit,
+		TimeInForce: constants.TimeInForcePostOnly,
+		Price:       1000,
+		Quantity:    10,
+		Remaining:   10,
+	}
+
+	trades, err := m.Match(incoming)
+
+	require.NoError(t, err)
+	require.Len(t, trades, 0)
+
+	require.Equal(
+		t,
+		constants.OrderStatusOpen,
+		incoming.Status,
+	)
+}
+
+func TestSellLimitDoesNotMatchBelowLimitPrice(t *testing.T) {
+	book := orderbook.New("BTCUSDT")
+	m := matcher.New(book)
+
+	buy := testhelpers.NewOrder(
+		1,
+		101,
+		constants.OrderSideBuy,
+		210022,
+		1,
+	)
+
+	book.AddOrder(buy)
+
+	sell := testhelpers.NewOrder(
+		2,
+		201,
+		constants.OrderSideSell,
+		300000,
+		1,
+	)
+
+	trades, err := m.Match(sell)
+
+	require.NoError(t, err)
+	require.Empty(t, trades)
+
+	assert.Equal(t, int64(1), sell.Remaining)
+	assert.Equal(t, constants.OrderStatusOpen, sell.Status)
+
+	assert.Equal(t, int64(1), buy.Remaining)
+	assert.Equal(t, constants.OrderStatusOpen, buy.Status)
+
+	assert.NotNil(t, book.BestBid())
+	assert.Equal(t, int64(210022), book.BestBid().Price)
+}

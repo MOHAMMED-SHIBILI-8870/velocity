@@ -1,0 +1,37 @@
+package repository
+
+import (
+	"context"
+
+	"velocity/internal/persistence/postgres/generated"
+)
+
+type userRepository struct {
+	queries *generated.Queries
+}
+
+func NewUserRepository(db generated.DBTX) UserRepository {
+	return &userRepository{
+		queries: generated.New(db),
+	}
+}
+
+func (r *userRepository) Create(ctx context.Context, params generated.CreateUserParams) (generated.User, error) {
+	return r.queries.CreateUser(ctx, params)
+}
+
+func (r *userRepository) GetByID(ctx context.Context, id int64) (generated.User, error) {
+	return r.queries.GetUserByID(ctx, id)
+}
+
+func (r *userRepository) GetByEmail(ctx context.Context, email string) (generated.User, error) {
+	return r.queries.GetUserByEmail(ctx, email)
+}
+
+func (r *userRepository) Exists(
+	ctx context.Context,
+	id int64,
+) (bool, error) {
+
+	return r.queries.ExistsUser(ctx, id)
+}

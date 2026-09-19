@@ -1,9 +1,16 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+
 	"velocity/internal/config"
+	"velocity/internal/infrastructure/redis"
+	"velocity/internal/persistence/postgres"
+	"velocity/internal/transport/http/middleware"
 	"velocity/pkg/logger"
 )
 
@@ -13,10 +20,7 @@ func Startup() (*Container, error) {
 
 	container := &Container{}
 
-	// --------------------------------------------------
-	// Load Configuration
-	// --------------------------------------------------
-
+	// Configuration
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -24,29 +28,59 @@ func Startup() (*Container, error) {
 
 	container.Config = cfg
 
-	// --------------------------------------------------
-	// Initialize Logger
-	// --------------------------------------------------
-
+	// Logger
 	if err := logger.Init(cfg.App.Environment); err != nil {
-		return nil, fmt.Errorf("initialize logger: %w", err)
+		return nil, fmt.Errorf(
+			"initialize logger: %w",
+			err,
+		)
 	}
 
 	container.Logger = logger.Logger()
 
-	container.Logger.Info("configuration loaded successfully")
+	container.Logger.Info(
+		"configuration loaded successfully",
+	)
 
-	// --------------------------------------------------
 	// Database
-	// --------------------------------------------------
-	// TODO:
-	// container.DB = postgres.New(cfg.Database)
+	db, err := postgres.New(cfg.Database)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"initialize postgres: %w",
+			err,
+		)
+	}
 
-	// --------------------------------------------------
+	container.DB = db
+
+	container.Logger.Info(
+		"postgres connection established",
+	)
+
+	//redis
+	redisClient := redis.New(cfg.Redis)
+	if err := redisClient.Ping(context.Background()); err != nil {
+		_ = redisClient.Close()
+
+		return nil, fmt.Errorf(
+			"initialize redis: %w",
+			err,
+		)
+	}
+	container.Redis = redisClient
+	container.Logger.Info("redis connection established")
+
 	// HTTP Server
-	// --------------------------------------------------
-	// TODO:
-	// container.HTTP = server.New(cfg.Server)
+	container.HTTP = fiber.New()
+
+	container.HTTP.Use(middleware.Metrics())
+	container.HTTP.Use(recover.New())
+
+	container.HTTP.Use(func(c *fiber.Ctx) error {
+		return c.Next()
+	})
+
+	container.HTTP.Use(recover.New())
 
 	return container, nil
 }

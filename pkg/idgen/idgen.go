@@ -1,6 +1,8 @@
 package idgen
 
 import (
+	"velocity/pkg/snowflake"
+
 	"github.com/google/uuid"
 )
 
@@ -23,4 +25,10 @@ func UUID() uuid.UUID {
 	}
 
 	return id
+}
+
+var gen = snowflake.New(0)
+
+func Next() int64 {
+	return gen.Next()
 }

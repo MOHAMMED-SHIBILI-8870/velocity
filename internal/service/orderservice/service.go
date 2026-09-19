@@ -1,0 +1,549 @@
+package orderservice
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"go.uber.org/zap"
+
+	"velocity/internal/domain/order"
+	"velocity/internal/engine/registry"
+	"velocity/internal/infrastructure/metrics"
+	"velocity/internal/persistence/postgres/generated"
+	"velocity/internal/persistence/postgres/mapper"
+	"velocity/internal/persistence/postgres/repository"
+	"velocity/internal/service/riskservice"
+	"velocity/internal/service/walletservice"
+	"velocity/internal/userstream"
+	"velocity/pkg/constants"
+	"velocity/pkg/errors"
+	"velocity/pkg/snowflake"
+	"velocity/pkg/timeutil"
+)
+
+type Service struct {
+	orderRepo  repository.OrderRepository
+	symbolRepo repository.SymbolRepository
+	userRepo   repository.UserRepository
+	tradeRepo  repository.TradeRepository
+
+	risk   *riskservice.Service
+	wallet *walletservice.Service
+
+	registry *registry.Registry
+	logger   *zap.Logger
+
+	UserDispatcher *userstream.Dispatcher
+	idGenerator    *snowflake.Generator
+}
+
+func New(
+	orderRepo repository.OrderRepository,
+	symbolRepo repository.SymbolRepository,
+	userRepo repository.UserRepository,
+	tradeRepo repository.TradeRepository,
+
+	risk *riskservice.Service,
+	wallet *walletservice.Service,
+
+	registry *registry.Registry,
+	logger *zap.Logger,
+
+	userDispatcher *userstream.Dispatcher,
+	idGenerator *snowflake.Generator,
+) *Service {
+	return &Service{
+		orderRepo:      orderRepo,
+		symbolRepo:     symbolRepo,
+		userRepo:       userRepo,
+		tradeRepo:      tradeRepo,
+		risk:           risk,
+		wallet:         wallet,
+		registry:       registry,
+		logger:         logger,
+		UserDispatcher: userDispatcher,
+		idGenerator:    idGenerator,
+	}
+}
+
+type SubmitOrderRequest struct {
+	UserID int64
+
+	Symbol string
+
+	Side        constants.OrderSide
+	Type        constants.OrderType
+	TimeInForce constants.TimeInForce
+
+	Price     int64
+	StopPrice int64
+	Quantity  int64
+}
+
+type ModifyOrderRequest struct {
+	Price    int64 `json:"price"`
+	Quantity int64 `json:"quantity"`
+}
+
+func (s *Service) Submit(
+	ctx context.Context,
+	req SubmitOrderRequest,
+) (*order.Order, error) {
+
+	userID := req.UserID
+
+	_, err := s.userRepo.GetByID(
+		ctx,
+		userID,
+	)
+	if err != nil {
+		return nil, errors.ErrUserNotFound
+	}
+
+	symbol, err := s.symbolRepo.Get(
+		ctx,
+		req.Symbol,
+	)
+	if err != nil {
+		return nil, errors.ErrSymbolNotFound
+	}
+
+	if !symbol.IsActive {
+		return nil, errors.ErrSymbolInactive
+	}
+
+	o := &order.Order{
+		ID:     s.idGenerator.Next(),
+		UserID: req.UserID,
+		Symbol: req.Symbol,
+
+		Side:        req.Side,
+		Type:        req.Type,
+		TimeInForce: req.TimeInForce,
+
+		Status: constants.OrderStatusOpen,
+
+		Price:     req.Price,
+		StopPrice: req.StopPrice,
+
+		Quantity:  req.Quantity,
+		Remaining: req.Quantity,
+		Filled:    0,
+
+		CreatedAt: timeutil.UTCNow(),
+		UpdatedAt: timeutil.UTCNow(),
+	}
+	s.logger.Info(
+		"creating order",
+		zap.String("tif", string(o.TimeInForce)),
+		zap.String("type", string(o.Type)),
+		zap.String("side", string(o.Side)),
+	)
+
+	_, err = s.risk.Validate(
+		ctx,
+		riskservice.ValidateOrderRequest{
+			Order: o,
+		},
+	)
+
+	if err != nil {
+		s.UserDispatcher.DispatchOrderRejected(o)
+		return nil, err
+	}
+
+	userID = o.UserID
+
+	switch o.Side {
+
+	case constants.OrderSideBuy:
+
+		amount := o.Price * o.Quantity
+
+		err = s.wallet.LockFunds(
+			ctx,
+			userID,
+			symbol.QuoteAsset,
+			amount,
+		)
+
+	case constants.OrderSideSell:
+
+		err = s.wallet.LockFunds(
+			ctx,
+			userID,
+			symbol.BaseAsset,
+			o.Quantity,
+		)
+	}
+
+	if err != nil {
+		s.UserDispatcher.DispatchOrderRejected(o)
+		return nil, err
+	}
+
+	_, err = s.orderRepo.Create(
+		ctx,
+		generated.CreateOrderParams{
+			ID:          o.ID,
+			UserID:      o.UserID,
+			Symbol:      o.Symbol,
+			Side:        string(o.Side),
+			OrderType:   string(o.Type),
+			TimeInForce: string(o.TimeInForce),
+			Status:      string(o.Status),
+
+			Price: pgtype.Int8{
+				Int64: o.Price,
+				Valid: true,
+			},
+
+			StopPrice: o.StopPrice,
+
+			Quantity:  o.Quantity,
+			Remaining: o.Remaining,
+			Filled:    o.Filled,
+
+			CreatedAt: o.CreatedAt,
+			UpdatedAt: o.UpdatedAt,
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	eng := s.registry.Get(req.Symbol)
+
+	err = eng.SubmitOrder(o)
+	if err != nil {
+		return nil, err
+	}
+	metrics.OrdersSubmitted.Inc()
+	s.UserDispatcher.DispatchOrderAccepted(o)
+
+	return o, nil
+}
+
+func (s *Service) Cancel(
+	ctx context.Context,
+	orderID int64,
+	userID int64,
+) error {
+
+	dbOrder, err := s.orderRepo.GetByID(
+		ctx,
+		orderID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	if dbOrder.UserID != userID {
+		return errors.ErrOrderNotFound
+	}
+
+	switch dbOrder.Status {
+	case string(constants.OrderStatusFilled),
+		string(constants.OrderStatusCancelled),
+		string(constants.OrderStatusRejected):
+
+		return errors.ErrOrderNotCancelable
+	}
+
+	eng, ok := s.registry.Find(dbOrder.Symbol)
+	if !ok {
+		return errors.ErrEngineUnavailable
+	}
+
+	err = eng.CancelOrder(orderID)
+	if err != nil {
+		return err
+	}
+
+	metrics.OrdersCancelled.Inc()
+
+	err = s.orderRepo.UpdateStatus(
+		ctx,
+		generated.UpdateOrderStatusParams{
+			ID:     dbOrder.ID,
+			Status: string(constants.OrderStatusCancelled),
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	o := &order.Order{
+		ID:        dbOrder.ID,
+		UserID:    dbOrder.UserID,
+		Symbol:    dbOrder.Symbol,
+		Status:    constants.OrderStatusCancelled,
+		Price:     dbOrder.Price.Int64,
+		Quantity:  dbOrder.Quantity,
+		Filled:    dbOrder.Filled,
+		Remaining: dbOrder.Remaining,
+	}
+
+	s.UserDispatcher.DispatchOrderCancelled(o)
+
+	return nil
+}
+
+func (s *Service) Modify(
+	ctx context.Context,
+	orderID int64,
+	userID int64,
+	req ModifyOrderRequest,
+) error {
+
+	dbOrder, err := s.orderRepo.GetByID(
+		ctx,
+		orderID,
+	)
+	if err != nil {
+		return errors.ErrOrderNotFound
+	}
+
+	if dbOrder.UserID != userID {
+		return errors.ErrOrderNotFound
+	}
+
+	if dbOrder.Status != string(constants.OrderStatusOpen) {
+		return errors.ErrOrderModificationNotAllowed
+	}
+
+	if req.Quantity < dbOrder.Filled {
+		return errors.ErrQuantityTooLow
+	}
+
+	eng := s.registry.Get(dbOrder.Symbol)
+
+	err = eng.ModifyOrder(
+		orderID,
+		req.Price,
+		req.Quantity,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	remaining := req.Quantity - dbOrder.Filled
+
+	metrics.OrdersModified.Inc()
+
+	err = s.orderRepo.UpdateOrderForModify(
+		ctx,
+		generated.UpdateOrderForModifyParams{
+			ID: dbOrder.ID,
+			Price: pgtype.Int8{
+				Int64: req.Price,
+				Valid: true,
+			},
+			Quantity:  req.Quantity,
+			Remaining: remaining,
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	o := &order.Order{
+		ID:        dbOrder.ID,
+		UserID:    dbOrder.UserID,
+		Symbol:    dbOrder.Symbol,
+		Status:    constants.OrderStatusOpen,
+		Price:     req.Price,
+		Quantity:  req.Quantity,
+		Filled:    dbOrder.Filled,
+		Remaining: remaining,
+	}
+
+	s.UserDispatcher.DispatchOrderModified(o)
+
+	return nil
+}
+
+func (s *Service) GetOpenOrders(
+	ctx context.Context,
+	userID int64,
+) ([]*order.Order, error) {
+
+	_, err := s.userRepo.GetByID(
+		ctx,
+		userID,
+	)
+	if err != nil {
+		return nil, errors.ErrUserNotFound
+	}
+
+	rows, err := s.orderRepo.ListOpenOrdersByUser(
+		ctx,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapper.ToDomainOrders(rows), nil
+}
+
+func (s *Service) ListOrderHistory(
+	ctx context.Context,
+	userID int64,
+) ([]*order.Order, error) {
+
+	_, err := s.userRepo.GetByID(
+		ctx,
+		userID,
+	)
+	if err != nil {
+		return nil, errors.ErrUserNotFound
+	}
+
+	rows, err := s.orderRepo.ListOrdersByUser(
+		ctx,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapper.ToDomainOrders(rows), nil
+}
+
+func (s *Service) GetOrderByID(
+	ctx context.Context,
+	orderID int64,
+) (*order.Order, error) {
+
+	dbOrder, err := s.orderRepo.GetByID(ctx, orderID)
+	if err != nil {
+		return nil, errors.ErrOrderNotFound
+	}
+
+	return mapper.ToDomainOrder(dbOrder), nil
+}
+
+func (s *Service) GetUserOrderByID(
+	ctx context.Context,
+	orderID int64,
+	userID int64,
+) (*order.Order, error) {
+
+	dbOrder, err := s.orderRepo.GetByUserAndID(
+		ctx,
+		generated.GetOrderByUserAndIDParams{
+			ID:     orderID,
+			UserID: userID,
+		},
+	)
+
+	if err != nil {
+		return nil, errors.ErrOrderNotFound
+	}
+
+	return mapper.ToDomainOrder(dbOrder), nil
+}
+
+func (s *Service) CancelAll(
+	ctx context.Context,
+	userID int64,
+	symbol string,
+) (int, error) {
+
+	_, err := s.userRepo.GetByID(
+		ctx,
+		userID,
+	)
+	if err != nil {
+		return 0, errors.ErrUserNotFound
+	}
+
+	var orders []generated.Order
+
+	if symbol == "" {
+		orders, err = s.orderRepo.ListCancelableOrdersByUser(
+			ctx,
+			userID,
+		)
+	} else {
+		_, err = s.symbolRepo.Get(
+			ctx,
+			symbol,
+		)
+		if err != nil {
+			return 0, errors.ErrSymbolNotFound
+		}
+
+		orders, err = s.orderRepo.ListCancelableOrdersByUserAndSymbol(
+			ctx,
+			generated.ListCancelableOrdersByUserAndSymbolParams{
+				UserID: userID,
+				Symbol: symbol,
+			},
+		)
+	}
+
+	if err != nil {
+		return 0, err
+	}
+
+	cancelled := 0
+
+	for _, dbOrder := range orders {
+		err := s.Cancel(
+			ctx,
+			dbOrder.ID,
+			userID,
+		)
+
+		if err != nil {
+			switch err {
+			case errors.ErrOrderNotCancelable,
+				errors.ErrOrderFilled,
+				errors.ErrOrderCancelled,
+				errors.ErrOrderNotFound:
+
+				// The order may have changed state
+				// between the initial query and cancellation.
+				continue
+
+			default:
+				return cancelled, err
+			}
+		}
+
+		cancelled++
+	}
+
+	return cancelled, nil
+}
+
+func (s *Service) GetOrderTrades(
+	ctx context.Context,
+	orderID int64,
+	userID int64,
+) ([]generated.Trade, error) {
+
+	dbOrder, err := s.orderRepo.GetByID(
+		ctx,
+		orderID,
+	)
+	if err != nil {
+		return nil, errors.ErrOrderNotFound
+	}
+
+	if dbOrder.UserID != userID {
+		return nil, errors.ErrOrderNotFound
+	}
+
+	return s.tradeRepo.ListByOrder(
+		ctx,
+		orderID,
+	)
+}

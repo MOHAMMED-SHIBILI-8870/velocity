@@ -1,15 +1,15 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+	"velocity/pkg/errors"
 )
 
 // Validate validates the entire application configuration.
 func Validate(cfg *Config) error {
 	if cfg == nil {
-		return errors.New("configuration is nil")
+		return errors.ErrConfigMissing
 	}
 
 	if err := validateApp(cfg.App); err != nil {
@@ -36,6 +36,10 @@ func Validate(cfg *Config) error {
 		return err
 	}
 
+	if err := validateKafka(cfg.Kafka); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -45,15 +49,19 @@ func Validate(cfg *Config) error {
 
 func validateApp(cfg AppConfig) error {
 	if strings.TrimSpace(cfg.Name) == "" {
-		return errors.New("app.name is required")
+		return errors.Wrap(
+			errors.CodeConfigMissing,
+			"app.name is required",
+			nil,
+		)
 	}
 
 	if strings.TrimSpace(cfg.Environment) == "" {
-		return errors.New("app.environment is required")
+		return errors.NewConfigMissing("app.environment")
 	}
 
 	if strings.TrimSpace(cfg.Version) == "" {
-		return errors.New("app.version is required")
+		return errors.NewConfigMissing("app.version")
 	}
 
 	return nil
@@ -65,11 +73,14 @@ func validateApp(cfg AppConfig) error {
 
 func validateServer(cfg ServerConfig) error {
 	if cfg.Host == "" {
-		return errors.New("server.host is required")
+		return errors.NewConfigMissing("server.host")
 	}
 
 	if cfg.Port < 1 || cfg.Port > 65535 {
-		return fmt.Errorf("server.port must be between 1 and 65535")
+		return errors.NewConfigInvalid(
+			"server.port",
+			"must be between 1 and 65535",
+		)
 	}
 
 	return nil
@@ -81,19 +92,19 @@ func validateServer(cfg ServerConfig) error {
 
 func validateDatabase(cfg DatabaseConfig) error {
 	if cfg.Host == "" {
-		return errors.New("database.host is required")
+		return errors.NewConfigMissing("database.host is required")
 	}
 
 	if cfg.Port < 1 || cfg.Port > 65535 {
-		return errors.New("database.port is invalid")
+		return errors.NewConfigMissing("database.port is invalid")
 	}
 
 	if cfg.User == "" {
-		return errors.New("database.user is required")
+		return errors.NewConfigMissing("database.user is required")
 	}
 
 	if cfg.Name == "" {
-		return errors.New("database.name is required")
+		return errors.NewConfigMissing("database.name is required")
 	}
 
 	return nil
@@ -125,15 +136,15 @@ func validateLogger(cfg LoggerConfig) error {
 
 func validateEngine(cfg EngineConfig) error {
 	if cfg.QueueSize <= 0 {
-		return errors.New("engine.queue_size must be greater than zero")
+		return errors.NewConfigMissing("engine.queue_size must be greater than zero")
 	}
 
 	if cfg.WorkerCount <= 0 {
-		return errors.New("engine.worker_count must be greater than zero")
+		return errors.NewConfigMissing("engine.worker_count must be greater than zero")
 	}
 
 	if cfg.PersistenceBuffer <= 0 {
-		return errors.New("engine.persistence_buffer must be greater than zero")
+		return errors.NewConfigMissing("engine.persistence_buffer must be greater than zero")
 	}
 
 	return nil
@@ -145,11 +156,45 @@ func validateEngine(cfg EngineConfig) error {
 
 func validateJWT(cfg JWTConfig) error {
 	if strings.TrimSpace(cfg.Secret) == "" {
-		return errors.New("jwt.secret is required")
+		return errors.NewConfigMissing("jwt.secret is required")
 	}
 
 	if strings.TrimSpace(cfg.Issuer) == "" {
-		return errors.New("jwt.issuer is required")
+		return errors.NewConfigMissing("jwt.issuer is required")
+	}
+
+	return nil
+}
+
+// ----------------------------------------------------
+// Kafka
+// ----------------------------------------------------
+
+func validateKafka(cfg KafkaConfig) error {
+	if len(cfg.Brokers) == 0 {
+		return errors.NewConfigMissing("kafka.brokers is required")
+	}
+
+	for _, broker := range cfg.Brokers {
+		if strings.TrimSpace(broker) == "" {
+			return errors.NewConfigMissing("kafka.brokers must not contain empty entries")
+		}
+	}
+
+	if strings.TrimSpace(cfg.Topic) == "" {
+		return errors.NewConfigMissing("kafka.topic is required")
+	}
+
+	if strings.TrimSpace(cfg.DLQTopic) == "" {
+		return errors.NewConfigMissing("kafka.dlq_topic is required")
+	}
+
+	if cfg.Topic == cfg.DLQTopic {
+		return errors.NewConfigMissing("kafka.topic and kafka.dlq_topic must be different")
+	}
+
+	if strings.TrimSpace(cfg.GroupID) == "" {
+		return errors.NewConfigMissing("kafka.group_id is required")
 	}
 
 	return nil
